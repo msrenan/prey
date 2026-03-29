@@ -5,3 +5,11 @@ version = 4
 [[package]]
 name = "prey"
 version = "0.1.0"
+
+[[package]]
+name = "prey-fire"
+version = "0.1.0"
+
+[[package]]
+name = "prey-proxy"
+version = "0.1.0"

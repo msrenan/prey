@@ -1,1 +1,15 @@
-target/*
+/target/
+
+.vscode/
+.idea/
+*.swp
+*~
+
+.log
+tmp/
+
+.DS_Store
+Thumbs.db
+
+.env
+.env.*
