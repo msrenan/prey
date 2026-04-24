@@ -13,7 +13,7 @@ To provide a modular and memory-safe infrastructure for:
 - User-space Firewalls (PREY-Fire)
 
 ## What is done so far?
-- Buffer structure.
+- Initial buffer structure.
 
 Created by **Renan Machado Santos**. Built for performance.
 
