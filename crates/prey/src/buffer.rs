@@ -109,6 +109,16 @@ impl Buffer {
             }
         }
     }
+
+    /// # fn clear
+    /// Allows clearing the buffer content by reseting its size and head position.
+    ///
+    /// # Params
+    /// - &mut self - Mutable reference to the manipulated buffer.
+    pub fn clear(&mut self) {
+        self.size = 0;
+        self.head = 128;
+    }
 }
 
 /// # BufferPool

@@ -20,3 +20,4 @@
 //! packets fit in the buffer and proxies and firewalls can easily add headers in the response.
 
 pub mod buffer;
+pub mod network;
