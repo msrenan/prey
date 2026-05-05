@@ -17,7 +17,16 @@ To provide a modular and memory-safe infrastructure for:
   - Buffer Pool Structure and functionality
     - Creation and buffers sectorization
   - Buffer Structure and functionality
-    - Reading, Writing and Editing data functions.
+    - Reading, Writing and Editing data functions
+- ### Network Module
+  - Connection structure and functionality
+    - Open a connection (Stream or RawSocket)
+    - Send and receive information
+
+- ### Packet Module
+  - Packet structure
+    - Packet parsing and mapping
+    - Checksum math
 
 
 Created by **Renan Machado Santos**. Built for performance.
