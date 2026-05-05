@@ -11,6 +11,7 @@ To provide a modular and memory-safe infrastructure for:
 - Layer 4/7 Reverse Proxying
 - High-throughput Load Balancing (Prey-Proxy)
 - User-space Firewalls (Prey-Fire)
+- Zero-Copy mechanism
 
 ## What is done so far?
 - ### Buffer Module
