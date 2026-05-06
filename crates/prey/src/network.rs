@@ -1,6 +1,6 @@
 //! # Network Module
-//! The Network Module of PREY framework contains all the comunication of user's code and the network.
-//! It defines what is a connection and deals with it: Opening, managing and shuting down.
+//! The Network Module of PREY framework contains all the communication of user's code and the network.
+//! It defines what is a connection and deals with it: Opening, managing and shutting down.
 
 #[cfg(target_os = "linux")]
 use std::net::{TcpStream, SocketAddr};
