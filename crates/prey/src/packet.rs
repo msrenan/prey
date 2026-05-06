@@ -5,7 +5,7 @@
 
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
-
+use std::ptr::null;
 //To-do -> Checksums
 
 /// # RawPacket
@@ -98,15 +98,17 @@ impl<'a> Packet<'a> {
         let eth = EthernetHeader::parse(self.raw)?;
         let raw = self.payload_after_ethernet()?;
         let mut current_offset = 0;
+        let mut ipv4 = Ipv4Header::null();
+        let mut ipv6 = Ipv6Header::null();
 
         let protocol = match eth.ether_type {
             EtherType::IPv4 => {
-                let ipv4 = Ipv4Header::parse(&raw[current_offset..])?;
+                ipv4 = Ipv4Header::parse(&raw[current_offset..])?;
                 current_offset += ipv4.length as usize;
                 ipv4.protocol
             },
             EtherType::IPv6 => {
-                let ipv6 = Ipv6Header::parse(&raw[current_offset..])?;
+                ipv6 = Ipv6Header::parse(&raw[current_offset..])?;
                 current_offset += 40;
                 ipv6.next_header
             }
@@ -115,10 +117,28 @@ impl<'a> Packet<'a> {
 
         match protocol {
             IpProtocol::TCP => {
+                if ipv4.version == 4 {
+                    if !validate_l4_checksum_ipv4(ipv4, &raw[current_offset..]) {
+                        return Err("Packet Corrupted: Invalid TCP Checksum");
+                    }
+                } else if ipv6.version == 6 {
+                    if !validate_l4_checksum_ipv6(ipv6, &raw[current_offset..]) {
+                        return Err("Packet Corrupted: Invalid TCP Checksum");
+                    }
+                }
                 let tcp = TCPHeader::parse(&raw[current_offset..])?;
                 current_offset += tcp.data_offset as usize;
             },
             IpProtocol::UDP => {
+                if ipv4.version == 4 {
+                    if !validate_l4_checksum_ipv4(ipv4, &raw[current_offset..]) {
+                        return Err("Packet Corrupted: Invalid UDP Checksum.");
+                    }
+                } else if ipv6.version == 6 {
+                    if !validate_l4_checksum_ipv6(ipv6, &raw[current_offset..]) {
+                        return Err("Packet Corrupted: Invalid TCP Checksum");
+                    }
+                }
                 let udp = UDPHeader::parse(&raw[current_offset..])?;
                 current_offset += 8;
             },
@@ -237,7 +257,6 @@ impl fmt::Display for EthernetHeader {
 
 /// # IpProtocol
 /// Enum that contains the possible IP protocols types
-///
 /// # Types
 /// - ICMP
 /// - TCP
@@ -284,6 +303,7 @@ impl fmt::Display for IpProtocol {
 /// - total_length: `u8` - A half-word that represents the total length of the next layers of the packet.
 /// - ttl: `u8` - A byte that represents the Packet's **Time-to-Live**.
 /// - protocol: `IpProtocol` - The IP protocol of the packet, mapped by **IpProtocol enum**.
+/// - checksum: `u16` - The IPv4 Header's checksum value.
 /// - src_ip: `Ipv4Addr` - The packet's source IP.
 /// - dst_ip: `Ipv4Addr` - The packet's destination IP.
 #[derive(Debug, Clone, Copy)]
@@ -293,6 +313,7 @@ pub struct Ipv4Header {
     pub total_length: u16,
     pub ttl: u8,
     pub protocol: IpProtocol,
+    pub checksum: u16,
     pub src_ip: Ipv4Addr,
     pub dst_ip: Ipv4Addr
 }
@@ -318,9 +339,16 @@ impl Ipv4Header {
             return Err("Packet have been compromised.");
         }
 
+        let hb = &raw[..length as usize];
+        if calculate_checksum(hb) != 0 {
+            return Err("Corrupted Packet: Invalid IPv4 Checksum");
+        }
+
         let total_length = u16::from_be_bytes([raw[2], raw[3]]);
         let ttl = raw[8];
         let protocol = IpProtocol::from(raw[9]);
+
+        let checksum = u16::from_be_bytes([raw[10], raw[11]]);
 
         let src_ip = Ipv4Addr::new(raw[12], raw[13], raw[14], raw[15]);
         let dst_ip = Ipv4Addr::new(raw[16], raw[17], raw[18], raw[19]);
@@ -331,9 +359,23 @@ impl Ipv4Header {
             total_length,
             ttl,
             protocol,
+            checksum,
             src_ip,
             dst_ip
         } )
+    }
+
+    pub fn null() -> Self {
+        Self {
+            protocol: IpProtocol::Unknown(0),
+            version: 0,
+            length: 0,
+            total_length: 0,
+            ttl: 0,
+            src_ip: Ipv4Addr::from_bits(0),
+            dst_ip: Ipv4Addr::from_bits(0),
+            checksum: 0
+        }
     }
 }
 
@@ -400,6 +442,17 @@ impl Ipv6Header {
             src_ip: Ipv6Addr::from(src_bytes),
             dst_ip: Ipv6Addr::from(dst_bytes)
         })
+    }
+
+    pub fn null() -> Self {
+        Self {
+            version: 0,
+            payload_length: 0,
+            next_header: IpProtocol::Unknown(0),
+            hop_limit: 0,
+            src_ip: Ipv6Addr::from_bits(0),
+            dst_ip: Ipv6Addr::from_bits(0)
+        }
     }
 }
 
@@ -593,4 +646,161 @@ impl fmt::Display for TCPHeader {
             self.src_port, self.dst_port, self.seq_number, self.ack_number, flags_str
         )
     }
+}
+
+pub struct ICMPHeader {
+    pub icmp_type: u8,
+    pub code: u8,
+    pub checksum: u16
+}
+
+impl ICMPHeader {
+    pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
+        if raw.len() < 8 {
+            return Err("Packet is too short too be ICMP.");
+        }
+
+        if calculate_checksum(raw) != 0 {
+            return Err("Corrupted Packet: Invalid ICMP Checksum.");
+        }
+
+        Ok(Self {
+            icmp_type: raw[0],
+            code: raw[1],
+            checksum: u16::from_be_bytes([raw[2], raw[3]])
+        })
+    }
+}
+
+impl fmt::Display for ICMPHeader {
+    //Implementation of trait display to ICMPHeader for displaying it on screen.
+
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "UDP {{ Type: {}, Code: {} }}",
+            self.icmp_type, self.code
+        )
+    }
+}
+
+pub fn calculate_checksum(data: &[u8]) -> u16 {
+    let mut sum = 0u32;
+    let mut i = 0;
+
+    while i < data.len().saturating_sub(1) {
+        let word = u16::from_be_bytes([data[i], data[i + 1]]) as u32;
+        sum += word;
+        i += 2;
+    }
+
+    if i < data.len() {
+        let word = u16::from_be_bytes([data[i], 0]) as u32;
+        sum += word;
+    }
+
+    while (sum >> 16) > 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+
+    !(sum as u16)
+}
+
+fn sum_be_u16_slice(data: &[u8]) -> u32 {
+    let mut sum = 0u32;
+    let mut i = 0;
+
+    while i < data.len().saturating_sub(1) {
+        sum += u16::from_be_bytes([data[i], data[i + 1]]) as u32;
+        i += 2;
+    }
+
+    if i < data.len() {
+        sum += u16::from_be_bytes([data[i], 0]) as u32;
+    }
+
+    sum
+}
+
+pub fn validate_l4_checksum_ipv4(v4_header: Ipv4Header, raw: &[u8]) -> bool {
+    let src = v4_header.src_ip;
+    let dst = v4_header.dst_ip;
+    let protocol = v4_header.protocol;
+
+    let mut sum = 0u32;
+
+    let src_octets = src.octets();
+    let dst_octets = dst.octets();
+
+    sum += u16::from_be_bytes([src_octets[0], src_octets[1]]) as u32;
+    sum += u16::from_be_bytes([src_octets[2], src_octets[3]]) as u32;
+    sum += u16::from_be_bytes([dst_octets[0], dst_octets[1]]) as u32;
+    sum += u16::from_be_bytes([dst_octets[2], dst_octets[3]]) as u32;
+
+    let proto_val = match protocol {
+        IpProtocol::TCP => 6u16,
+        IpProtocol::UDP => 17u16,
+        _ => 0
+    };
+
+    sum += proto_val as u32;
+
+    sum += raw.len() as u32;
+    sum += sum_be_u16_slice(raw);
+
+    while (sum >> 16) > 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+
+    let final_checksum = !(sum as u16);
+
+    if protocol == IpProtocol::UDP && raw.len() >= 8 {
+        let sent_checksum = u16::from_be_bytes([raw[6], raw[7]]);
+        if sent_checksum == 0 { return true; }
+    }
+
+    final_checksum == 0
+}
+
+pub fn validate_l4_checksum_ipv6(v6_header: Ipv6Header, raw: &[u8]) -> bool {
+    let src = v6_header.src_ip;
+    let dst = v6_header.dst_ip;
+    let protocol = v6_header.next_header;
+
+    let mut sum: u32 = 0;
+
+    for &segment in &src.segments() {
+        sum += segment as u32;
+    }
+    for &segment in &dst.segments() {
+        sum += segment as u32;
+    }
+
+    let len = raw.len() as u32;
+    sum += (len >> 16) & 0xFFFF;
+    sum += len & 0xFFFF;
+
+    let proto_val = match protocol {
+        IpProtocol::TCP => 6u16,
+        IpProtocol::UDP => 17u16,
+        _ => 0,
+    };
+    sum += proto_val as u32;
+
+    sum += sum_be_u16_slice(raw);
+
+    while (sum >> 16) > 0 {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+
+    let final_checksum = !(sum as u16);
+
+    if protocol == IpProtocol::UDP && raw.len() >= 8 {
+        let sent_checksum = u16::from_be_bytes([raw[6], raw[7]]);
+        if sent_checksum == 0 {
+            return false;
+        }
+    }
+
+    final_checksum == 0
 }
