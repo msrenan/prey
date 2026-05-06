@@ -5,7 +5,6 @@
 
 use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::ptr::null;
 //To-do -> Checksums
 
 /// # RawPacket
@@ -111,6 +110,11 @@ impl<'a> Packet<'a> {
                 ipv6 = Ipv6Header::parse(&raw[current_offset..])?;
                 current_offset += 40;
                 ipv6.next_header
+            },
+            EtherType::ARP => {
+                let arp = ARPHeader::parse(&raw[current_offset..]);
+                current_offset += 20;
+                return Ok(&raw[current_offset..]);
             }
             _ => return Ok(&raw[current_offset..])
         };
@@ -803,4 +807,94 @@ pub fn validate_l4_checksum_ipv6(v6_header: Ipv6Header, raw: &[u8]) -> bool {
     }
 
     final_checksum == 0
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ARPOperation {
+    Request,
+    Reply,
+    Unknown(u16)
+}
+
+impl From<u16> for ARPOperation {
+    fn from(value: u16) -> Self {
+        match value {
+            1 => ARPOperation::Request,
+            2 => ARPOperation::Reply,
+            _ => ARPOperation::Unknown(value)
+        }
+    }
+}
+
+impl fmt::Display for ARPOperation {
+    //Implementation of trait display to ARPOperation for displaying it on screen.
+
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ARPOperation::Request => write!(f, "Request"),
+            ARPOperation::Reply => write!(f, "Reply"),
+            ARPOperation::Unknown(val) => write!(f, "Unknown ({})", val),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ARPHeader {
+    pub hw_type: u16,
+    pub prt_type: u16,
+    pub hw_addr_len: u8,
+    pub prt_addr_len: u8,
+    pub op: ARPOperation,
+    pub snd_hw_addr: [u8; 6],
+    pub snd_prt_addr: Ipv4Addr,
+    pub tgt_hw_addr: [u8; 6],
+    pub tgt_prt_addr: Ipv4Addr,
+}
+
+impl ARPHeader {
+    pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
+        if raw.len() < 28 {
+            return Err("Packet is too short to be ARP.");
+        }
+
+        let mut snd_hw_addr = [0u8; 6];
+        snd_hw_addr.copy_from_slice(&raw[8..14]);
+
+        let snd_prt_addr = Ipv4Addr::new(raw[14], raw[15], raw[16], raw[17]);
+
+        let mut tgt_hw_addr = [0u8; 6];
+        tgt_hw_addr.copy_from_slice(&raw[18..24]);
+
+        let tgt_prt_addr = Ipv4Addr::new(raw[24], raw[25], raw[26], raw[27]);
+
+        Ok(Self {
+            hw_type: u16::from_be_bytes([raw[0], raw[1]]),
+            prt_type: u16::from_be_bytes([raw[2], raw[3]]),
+            hw_addr_len: raw[4],
+            prt_addr_len: raw[5],
+            op: ARPOperation::from(u16::from_be_bytes([raw[6], raw[7]])),
+            snd_hw_addr,
+            snd_prt_addr,
+            tgt_hw_addr,
+            tgt_prt_addr,
+        })
+    }
+}
+
+impl fmt::Display for ARPHeader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let sha = self.snd_hw_addr;
+        let sha_str = format!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                              sha[0], sha[1], sha[2], sha[3], sha[4], sha[5]);
+
+        let tha = self.tgt_hw_addr;
+        let tha_str = format!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                              tha[0], tha[1], tha[2], tha[3], tha[4], tha[5]);
+
+        write!(
+            f,
+            "ARP {} {{ Sender: {} ({}), Target: {} ({}) }}",
+            self.op, sha_str, self.snd_prt_addr, tha_str, self.tgt_prt_addr
+        )
+    }
 }
