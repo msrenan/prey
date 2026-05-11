@@ -50,4 +50,3 @@
 pub mod buffer;
 pub mod network;
 pub mod packet;
-mod request;
