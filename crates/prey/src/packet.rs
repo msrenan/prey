@@ -3,10 +3,9 @@
 //! that came from the stream or from the raw socket. It defines what is a packet and how to deal with
 //! it.
 
-use std::fmt;
-//To-do -> Checksums
+use std::{fmt, net::{Ipv4Addr, Ipv6Addr}};
 
-/// # RawPacket
+/// # Packet
 /// Struct that holds a pointer for the raw bytes of a packet in a buffer.
 ///
 /// ### Lifetime <'a>
@@ -14,6 +13,7 @@ use std::fmt;
 ///
 /// # Fields
 /// - raw: `&'a [u8]` - Pointer to the raw bytes of the packet within a buffer.
+#[derive(Clone, Copy, Debug)]
 pub struct Packet<'a> {
     pub raw: &'a [u8]
 }
@@ -55,119 +55,234 @@ impl<'a> Packet<'a> {
     pub fn is_empty(&self) -> bool {
         self.raw.is_empty()
     }
-
-    /// # fn ethernet_header
-    /// Function that parses the packet to extract the **ethernet header**.
-    ///
-    /// # Params
-    /// - &self - A reference to the manipulated Packet.
-    ///
-    /// # Returns
-    /// A `Result` containing a *EthernetHeader* object or a static error message.
-    pub fn ethernet_header(&self) -> Result<EthernetHeader, &'static str> {
-        EthernetHeader::parse(self.raw)
-    }
 }
 
+
 /// # EtherType
-/// Enum that contains the possible ethernet connection types.
+/// Enum that contains all possibilites of ethernet type of a packet.
+/// 
 /// # Types
 /// - IPv4
 /// - IPv6
 /// - ARP
-/// - Unknown - used for unmapped types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EtherType {
     IPv4,
     IPv6,
-    ARP,
-    Unknown(u16)
-}
-
-impl From<u16> for EtherType {
-    //Implementation of trait from to EtherType for initializing
-    fn from(value: u16) -> Self {
-        match value {
-            0x0800 => EtherType::IPv4,
-            0x86DD => EtherType::IPv6,
-            0x0806 => EtherType::ARP,
-            _ => EtherType::Unknown(value)
-        }
-    }
-}
-
-impl fmt::Display for EtherType {
-    //Implementation of trait display to EtherType for displaying it on screen.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EtherType::IPv4 => write!(f, "IPv4"),
-            EtherType::IPv6 => write!(f, "IPv6"),
-            EtherType::ARP => write!(f, "ARP"),
-            EtherType::Unknown(val) => write!(f, "Unknown type: (0x{:04X})", val),
-        }
-    }
+    ARP
 }
 
 /// # EthernetHeader
-/// Struct that contains all Ethernet Header information.
-///
+/// Struct that defines and separate all information of packet's ethernet header.
+/// 
 /// # Fields
-/// - dst_mac: `[u8; 6]` - A array of 6 bytes that represents the Destination MAC address.
-/// - src_mac: `[u8; 6]` - A array of 6 bytes that represents the Source MAC address.
-/// - ether_type: `EtherType` - The ethernet connection type, mapped by the **EtherType enum**.
-#[derive(Debug, Clone, Copy)]
+/// - dst_mac: `[u8; 6]` - Destination MAC address
+/// - src_mac: `[u8; 6]` - Source MAC address
+/// - ether_type: `EtherType` - Ethernet Connection Type
+#[derive(Clone, Copy, Debug)]
 pub struct EthernetHeader {
     pub dst_mac: [u8; 6],
     pub src_mac: [u8; 6],
     pub ether_type: EtherType
 }
 
-impl EthernetHeader {
-    /// # fn parse
-    /// Extract the ethernet header from a packet.
-    ///
-    /// # Params
-    /// - raw: `&[u8] - A reference to the raw packet's bytes.
-    ///
-    /// # Returns
-    /// A `Result` containing a new EthernetHeader object or a static error message.
-    pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
-        if raw.len() < 14 {
-            return Err("Packet is too short to have an Ethernet Header.");
-        }
 
-        let mut dst_mac = [0u8; 6];
-        dst_mac.copy_from_slice(&raw[0..6]);
-
-        let mut src_mac = [0u8; 6];
-        src_mac.copy_from_slice(&raw[6..12]);
-
-        let eth_type = EtherType::from(u16::from_be_bytes([raw[12], raw[13]]));
-
-        Ok(Self {
-            dst_mac,
-            src_mac,
-            ether_type: eth_type
-        })
-    }
+/// # IpProtocol
+/// Enum that contains all possibilities of packet's protocol.
+/// 
+/// # Types
+/// - TCP
+/// - UDP
+/// - ICMP
+/// - Unknown(`u8`) - Special type, further customization or expansion of the framework
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IpProtocol {
+    TCP,
+    UDP,
+    ICMP,
+    Unknown(u8)
 }
 
-impl fmt::Display for EthernetHeader {
-    //Implementation of fmt::Display trait for EthernetHeader for better viewing.
-    fn fmt(&self, f:&mut fmt::Formatter<'_>) -> fmt::Result {
-        let dst = self.dst_mac;
-        let dst_str = format!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-            dst[0], dst[1], dst[2], dst[3], dst[4], dst[5]);
-
-        let src = self.src_mac;
-        let src_str = format!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-                              src[0], src[1], src[2], src[3], src[4], src[5]);
-
-        write!(
-            f,
-            "Ethernet Header {{Destiny MAC: {}, Source MAC: {}, EthernetType: {} }}",
-            dst_str, src_str, self.ether_type
-        )
-    }
+/// # IPv4Header
+/// Struct that defines and separate all information of packet's IPv4 Header.
+/// 
+/// # Fields
+/// - version_and_ihl: `u8` - Version of IP and In Header Length
+/// - tos: `u8` - Type of Service
+/// - total_len: `u16` - Total length (payload + ihl)
+/// - id: `u16` - Identification
+/// - flags: `u16` - Flags
+/// - ttl: `u8` - Time to Live
+/// - protocol: `IpProtocol` - Packet's protocol
+/// - checksum: `u16` - Checksum value
+/// - src_ip: `Ipv4Addr` - Source IP
+/// - dst_ip: `Ipv4Addr` - Destination IP
+#[derive(Clone, Copy, Debug)]
+pub struct IPv4Header {
+    pub version_and_ihl: u8,
+    pub tos: u8,
+    pub total_len: u16,
+    pub id: u16,
+    pub flags: u16,
+    pub ttl: u8,
+    pub protocol: IpProtocol,
+    pub checksum: u16,
+    pub src_ip: Ipv4Addr,
+    pub dst_ip: Ipv4Addr
 }
 
+/// # IPv6Header
+/// Struct that defines and separates all information of packet's IPv6 Header.
+/// 
+/// # Fields
+/// - vcf: `u32` - Version, Class and FlowLevel
+/// - payload_length: `u16` - Payload Length
+/// - next_header: `IpProtocol` - Packet's protocol
+/// - hop_limit: `u8` - Hop Limit (ipv6 ttl)
+/// - src_ip: `Ipv6Addr` - Source IP
+/// - dst_ip: `Ipv6Addr` - Destination IP
+#[derive(Clone, Copy, Debug)]
+pub struct IPv6Header {
+    pub vcf: u32,
+    pub payload_length: u16,
+    pub next_header: IpProtocol,
+    pub hop_limit: u8,
+    pub src_ip: Ipv6Addr,
+    pub dst_ip: Ipv6Addr
+}
+
+/// # ArpOperation
+/// Enum containing all possibilities for a ARP package operation, based on its opcode.
+/// 
+/// # Types
+/// - Request
+/// - Reply
+/// - RRequest - Reverse Request (RARP Request)
+/// - RReply - Reverse Reply (RARP Reply)
+/// - IRequest - Inverted Request
+/// - IReply - Inverted Reply
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArpOperation {
+    Request,
+    Reply,
+    RRequest,
+    RReply,
+    IRequest,
+    IReply
+}
+
+/// # ArpHeader
+/// Struct that defines and separates all information of packet's ARP Header.
+/// 
+/// # Fields
+/// - hw_type: `u16` - Hardware Type
+/// - protocol_type: `u16` - Protocol type
+/// - hw_size: `u8` - Hardware Size
+/// - protocol_size: `u8` - Protocol Size
+/// - op: `ArpOperation` - Operation
+/// - snd_mac: `[u8; 6]` - Sender's MAC address
+/// - snd_ip: `u32` - Sender's IP
+/// - tgt_mac: `[u8; 6]` - Target's MAC address
+/// - tgt_ip: `u32` - Target's IP
+#[derive(Clone, Copy, Debug)]
+pub struct ArpHeader {
+    pub hw_type: u16,
+    pub protocol_type: u16,
+    pub hw_size: u8,
+    pub protocol_size: u8,
+    pub op: ArpOperation,
+    pub snd_mac: [u8; 6],
+    pub snd_ip: u32,
+    pub tgt_mac: [u8; 6],
+    pub tgt_ip: u32
+}
+
+/// # UdpHeader
+/// Struct that defines and separates all information of packet's UDP Header.
+/// 
+/// # Fields
+/// - src_port: `u16` - Source Port
+/// - dst_port: `u16` - Destination Port
+/// - length: `u16` - Length
+/// - checksum: `u16` - Checksum value
+#[derive(Clone, Copy, Debug)]
+pub struct UdpHeader {
+    pub src_port: u16,
+    pub dst_port: u16,
+    pub length: u16,
+    pub checksum: u16,
+}
+
+/// # TcpHeader
+/// Struct that defines and separates all information of packet's TCP Header.
+/// 
+/// # Fields
+/// - src_port: `u16` - Source Port
+/// - dst_port: `u16` - Destination Port
+/// - seq_number: `u32` - Sequence Number
+/// - ack_number: `u32` - Acknoledgement Number
+/// - data_offset: `u8` - Offset to the start of the payload
+/// - flags: `u8` - Flags
+/// - window_size: `u16` - Window Size
+/// - checksum: `u16` - Checksum value
+/// - urgent_pointer: `u16` - Urgent Pointer
+#[derive(Clone, Copy, Debug)]
+pub struct TcpHeader{
+    pub src_port: u16,
+    pub dst_port: u16,
+    pub seq_number: u32,
+    pub ack_number: u32,
+    pub data_offset: u8,
+    pub flags: u8,
+    pub window_size: u16,
+    pub checksum: u16,
+    pub urgent_pointer: u16
+}
+
+/// # IcmpHeader
+/// Struct that defines and separates all information of packet's TCP Header.
+/// 
+/// # Fields
+/// - icmp_type: `u8` - Type
+/// - code: `u8` - Code
+/// - checksum: `u16` - Checksum value
+/// - id: `u16` - Identification
+/// - seq_number: `u16` - Sequence number
+#[derive(Clone, Copy, Debug)]
+pub struct IcmpHeader {
+    pub icmp_type: u8,
+    pub code: u8,
+    pub checksum: u16,
+    pub id: u16,
+    pub seq_number: u16
+}
+
+/// # L3
+/// Enum that contains all possible L3 Headers.
+/// 
+/// # Types
+/// - IPv4(IPv4Header, IpProtocol) - holds the IPv4Header and Protocol of the packet to ease some processes
+/// - IPv6(IPv6Header, IpProtocol) - holds the IPv6Header and Protocol of the packet to ease some processes
+/// - ARP(ArpHeader) - holds only the ArpHeader because does not have anything relevant besides it
+pub enum L3 {
+    IPv4(IPv4Header, IpProtocol),
+    IPv6(IPv6Header, IpProtocol),
+    ARP(ArpHeader)
+}
+
+/// # L4
+/// Enum that contains all possible L4 Headers.
+/// 
+/// # Types
+/// - TCP(TcpHeader) - holds the TcpHeader of the packet to ease some processes
+/// - UDP(UdpHeader) - holds the UdpHeader of the packet to ease some processes
+/// - ICMP(IcmpHeader) - holds the IcmpHeader of the packet to ease some processes
+/// - Raw - show that the remaining bytes of the packet are already the payload.
+/// - Unknown(u8) - holds the byte that represents the protocol/next_header data of Ipv4/6 Header.
+pub enum L4 {
+    TCP(TcpHeader),
+    UDP(UdpHeader),
+    ICMP(IcmpHeader),
+    Raw,
+    Unknown(u8)
+}
