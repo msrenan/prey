@@ -2,12 +2,14 @@
 //! The Network Module of PREY framework contains all the communication of user's code and the network.
 //! It defines what is a connection and deals with it: Opening, managing and shutting down.
 
+use std::mem;
 #[cfg(target_os = "linux")]
 use std::net::{TcpStream, SocketAddr};
 use std::io::{self, Read, Write};
 use crate::buffer::Buffer;
 use libc::{socket, AF_PACKET, SOCK_RAW, fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
 use std::os::unix::io::RawFd;
+use std::ffi::CString;
 
 /// # Connection
 /// Struct that contains the structure of a connection of the PREY framework
@@ -126,21 +128,51 @@ impl RawSocket {
     ///
     /// # Returns
     /// A `Result` containing the RawSocket object.
-    pub fn new() -> io::Result<Self> {
+    pub fn new(interface: &str) -> io::Result<Self> {
         unsafe {
-            let protocol = 0x0300;
-            let fd = socket(AF_PACKET, SOCK_RAW, protocol);
+            let protocol = 0x0300 as u16;
+            let fd = socket(AF_PACKET, SOCK_RAW, protocol as i32);
             if fd < 0 {
                 return Err(io::Error::last_os_error());
             }
 
+            let c_ifname = CString::new(interface).map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidInput, "Invalid interface name.")
+            })?;
+
+            let ifindex = libc::if_nametoindex(c_ifname.as_ptr());
+
+            if ifindex == 0 {
+                libc::close(fd);
+                return Err(io::Error::new(io::ErrorKind::NotFound, "Network Interface not found!"));
+            }
+
+            let mut sll: libc::sockaddr_ll = mem::zeroed();
+
+            sll.sll_family = AF_PACKET as u16;
+            sll.sll_protocol = protocol;
+            sll.sll_ifindex = ifindex as i32;
+
+            let bind_res = libc::bind(fd, &sll as *const _ as * const libc::sockaddr,
+            mem::size_of::<libc::sockaddr_ll>() as u32);
+
+            if bind_res < 0 {
+                let err = io::Error::last_os_error();
+                libc::close(fd);
+                return Err(err);
+            }
+
             let flags = fcntl(fd, F_GETFL, 0);
             if flags < 0 {
-                return Err(io::Error::last_os_error());
+                let err = io::Error::last_os_error();
+                libc::close(fd);
+                return Err(err);
             }
 
             if fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 {
-                return Err(io::Error::last_os_error());
+                let err = io::Error::last_os_error();
+                libc::close(fd);
+                return Err(err);
             }
 
             Ok(Self { fd })
