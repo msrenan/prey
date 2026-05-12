@@ -143,6 +143,42 @@ impl<'a> Packet<'a> {
             Err("Packet is too short.")
         }
     }
+
+    pub fn build_arp_reply(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
+        let (eth, _) = self.ethernet_header().unwrap();
+        let (l3, _) = self.l3_header().unwrap();
+        let arp = match l3 {
+            L3::ARP(h) => h,
+            _ => { return Err("You can't build an arp reply from a non-arp packet"); }
+        };
+
+        let mut packet = Vec::with_capacity(42);
+
+        let r_eth = EthernetHeader {
+            src_mac: arp.tgt_mac,
+            dst_mac: arp.snd_mac,
+            ether_type: EtherType::ARP
+        };
+
+        packet.extend_from_slice(&r_eth.serialize());
+
+        let r_arp = ArpHeader {
+            hw_type: 0x0001,
+            protocol_type: 0x0800,
+            hw_size: 0x06,
+            protocol_size: 0x04,
+            op: ArpOperation::Reply,
+            snd_mac: arp.tgt_mac,
+            snd_ip: arp.tgt_ip,
+            tgt_mac: arp.snd_mac,
+            tgt_ip: arp.snd_ip
+        };
+
+        packet.extend_from_slice(&r_arp.serialize());
+
+        buf[..packet.len()].copy_from_slice(&packet);
+        Ok(packet.len())
+    }
 }
 
 
@@ -534,8 +570,8 @@ impl fmt::Display for ArpHeader {
         );
 
         write!(f,
-            "{{ ArpHeader: *op={} *protocol_type={} *snd_mac={} *tgt_mac={} }}",
-            self.op, self.protocol_type, snd, tgt
+            "{{ ArpHeader: *op={} *protocol_type={} *snd_mac={} *tgt_mac={} *tgt_ip={} }}",
+            self.op, self.protocol_type, snd, tgt, self.tgt_ip
         )
     }
 }
@@ -595,11 +631,11 @@ impl<'a> fmt::Display for Packet<'a> {
         let (eth, _) = self.ethernet_header().unwrap();
         let (l3, _) = match self.l3_header() {
             Ok(x) => x,
-            Err(e) => (L3::Unknown(0), 0)
+            Err(_) => (L3::Unknown(0), 0)
         };
         let (l4, _) = match self.l4_header() {
             Ok(x) => x,
-            Err(e) => (L4::Raw, 0)
+            Err(_) => (L4::Raw, 0)
         };
         let payload: &'a [u8] = self.payload().unwrap();
 
@@ -630,6 +666,16 @@ impl EthernetHeader {
             src_mac,
             ether_type
         })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut h_b = Vec::with_capacity(14);
+
+        h_b.extend_from_slice(&self.dst_mac);
+        h_b.extend_from_slice(&self.src_mac);
+        h_b.extend_from_slice(&EtherType::serialize(EtherType::ARP).to_be_bytes());
+
+        h_b
     }
 }
 
@@ -663,6 +709,22 @@ impl ArpHeader {
             tgt_ip
         })
 
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut h_b = Vec::with_capacity(28);
+
+        h_b.extend_from_slice(&self.hw_type.to_be_bytes());
+        h_b.extend_from_slice(&self.protocol_type.to_be_bytes());
+        h_b.extend_from_slice(&[self.hw_size]);
+        h_b.extend_from_slice(&[self.protocol_size]);
+        h_b.extend_from_slice(&ArpOperation::serialize(self.op).to_be_bytes());
+        h_b.extend_from_slice(&self.snd_mac);
+        h_b.extend_from_slice(&self.snd_ip.octets());
+        h_b.extend_from_slice(&self.tgt_mac);
+        h_b.extend_from_slice(&self.tgt_ip.octets());
+
+        h_b
     }
 }
 
@@ -822,5 +884,46 @@ impl TcpHeader {
             checksum,
             urgent_pointer
         })
+    }
+}
+
+impl EtherType {
+    pub fn serialize(ether_type: EtherType) -> u16 {
+        match ether_type {
+            EtherType::ARP => 0x0806,
+            EtherType::IPv4 => 0x0800,
+            EtherType::IPv6 => 0x86DD,
+            EtherType::Unknown(b) => b
+        }
+    }
+}
+
+impl IpProtocol {
+    pub fn serialize(protocol: IpProtocol, version: u8) -> u8 {
+        match protocol {
+            IpProtocol::ICMP => {
+                if version == 4 {
+                    1 as u8
+                } else {
+                    58 as u8
+                }
+            }
+            IpProtocol::TCP => 6 as u8,
+            IpProtocol::UDP => 17 as u8,
+            IpProtocol::Unknown(value) => value
+        }
+    }
+}
+
+impl ArpOperation {
+    pub fn serialize(op: ArpOperation) -> u16 {
+        match op {
+            ArpOperation::Request => 0x0001 ,
+            ArpOperation::Reply => 0x0002 ,
+            ArpOperation::RRequest => 0x0003 ,
+            ArpOperation::RReply => 0x0004 ,
+            ArpOperation::IRequest => 0x0008 ,
+            ArpOperation::IReply => 0x0009 ,
+        }
     }
 }

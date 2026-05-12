@@ -3,15 +3,17 @@
 //! It defines what is a connection and deals with it: Opening, managing and shutting down.
 
 use std::fs::{File, OpenOptions};
-use std::mem;
+use std::{char, mem};
 #[cfg(target_os = "linux")]
 use std::net::{TcpStream, SocketAddr};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use crate::buffer::Buffer;
-use libc::{socket, AF_PACKET, SOCK_RAW, fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
+use libc::{AF_PACKET, F_GETFL, F_SETFL, O_NONBLOCK, SOCK_RAW, fcntl, seteuid, socket};
 use std::os::unix::io::RawFd;
 use std::ffi::CString;
+use std::process::{Command, Stdio};
+use std::error::Error;
 
 const TUNSETIFF: libc::c_ulong = 0x400454ca;
 const IFF_TAP: libc::c_short = 0x0002;
@@ -135,7 +137,9 @@ impl RawSocket {
     ///
     /// # Returns
     /// A `Result` containing the RawSocket object.
-    pub fn new(interface: &str) -> io::Result<Self> {
+    pub fn new(interface: &str, sub_network: String) -> io::Result<Self> {
+        setup_tap_interface(sub_network).unwrap();
+
         // 1. PRIMEIRO: Criamos e registramos a interface virtual no Kernel
         let tap_file = OpenOptions::new()
             .read(true)
@@ -296,4 +300,69 @@ struct Ifreq {
     ifr_name: [u8; 16],
     ifr_flags: libc::c_short,
     _pad: [u8; 22],
+}
+
+fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
+    let interface = "tap0";
+
+    // 1. Verificar se a interface existe
+    let exists = Command::new("ip")
+        .args(["link", "show", interface])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?
+        .success();
+
+    if !exists {
+        println!("[PREY] :: creating {} interface.", interface);
+        Command::new("sudo").args(["ip", "tuntap", "add", "mode", "tap", interface]).status()?;
+    } else {
+        println!("[PREY] :: {} already exists.", interface);
+    }
+
+    // 2. Tentar adicionar o IP (Tratando "File exists" / Already addressed)
+    let ip_output = Command::new("sudo")
+        .args(["ip", "addr", "add", &sub_network, "dev", interface])
+        .stderr(Stdio::piped()) // Captura o erro
+        .output()?;
+
+    if !ip_output.status.success() {
+        let err_msg = String::from_utf8_lossy(&ip_output.stderr);
+        if err_msg.contains("File exists") {
+            println!("[PREY] :: {} is already addressed.", interface);
+        } else {
+            eprintln!("[PREY] :: error setting IP: {}", err_msg.trim());
+        }
+    }
+
+    // 3. Subir a interface
+    Command::new("sudo")
+        .args(["ip", "link", "set", interface, "up"])
+        .status()?;
+
+    // 4. Lógica do IP vizinho (.2)
+    let base_ip = sub_network.split_once("/").map(|(ip, _)| ip).unwrap_or(&sub_network);
+    let mut parts: Vec<&str> = base_ip.split('.').collect();
+    if parts.len() == 4 {
+        parts[3] = "2"; // Muda o último octeto para 2
+    }
+    let ip_dest = parts.join(".");
+
+    // 5. Neigh Replace (Idempotente, não costuma reclamar se já existe)
+    let neigh_status = Command::new("sudo")
+        .args([
+            "ip", "neigh", "replace", &ip_dest, 
+            "lladdr", "aa:bb:cc:dd:ee:ff", 
+            "dev", interface, "nud", "permanent"
+        ])
+        .status()?;
+
+    if neigh_status.success() {
+        println!("[PREY] :: routing for {} via {} is active.", ip_dest, interface);
+        println!("[PREY] :: tap0 interface was successfully synchronized!");
+    } else {
+        return Err("[PREY] :: failed to set neighbor table. Shutting down!".into());
+    }
+
+    Ok(())
 }
