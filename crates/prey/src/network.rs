@@ -2,14 +2,20 @@
 //! The Network Module of PREY framework contains all the communication of user's code and the network.
 //! It defines what is a connection and deals with it: Opening, managing and shutting down.
 
+use std::fs::{File, OpenOptions};
 use std::mem;
 #[cfg(target_os = "linux")]
 use std::net::{TcpStream, SocketAddr};
 use std::io::{self, Read, Write};
+use std::os::fd::AsRawFd;
 use crate::buffer::Buffer;
 use libc::{socket, AF_PACKET, SOCK_RAW, fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
 use std::os::unix::io::RawFd;
 use std::ffi::CString;
+
+const TUNSETIFF: libc::c_ulong = 0x400454ca;
+const IFF_TAP: libc::c_short = 0x0002;
+const IFF_NO_PI: libc::c_short = 0x1000;
 
 /// # Connection
 /// Struct that contains the structure of a connection of the PREY framework
@@ -119,7 +125,8 @@ impl<S: Read + Write> Connection<S> {
 /// # Fields
 /// - fd: `RawFd` - file descriptor to the socket file.
 pub struct RawSocket {
-    pub fd: RawFd
+    pub fd: RawFd,
+    pub tap_file: File
 }
 
 impl RawSocket {
@@ -129,9 +136,34 @@ impl RawSocket {
     /// # Returns
     /// A `Result` containing the RawSocket object.
     pub fn new(interface: &str) -> io::Result<Self> {
+        // 1. PRIMEIRO: Criamos e registramos a interface virtual no Kernel
+        let tap_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/net/tun")?;
+
+        let mut ifr: Ifreq = unsafe { std::mem::zeroed() };
+        
+        // Converte o nome passado por parâmetro (ex: "tap0")
+        let name_bytes = interface.as_bytes();
+        let len = std::cmp::min(name_bytes.len(), 15);
+        ifr.ifr_name[..len].copy_from_slice(&name_bytes[..len]);
+        ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
+
         unsafe {
-            let protocol = 0x0300 as u16;
-            let fd = socket(AF_PACKET, SOCK_RAW, protocol as i32);
+            if libc::ioctl(tap_file.as_raw_fd(), TUNSETIFF, &ifr) < 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+
+        // A partir desta linha, a TAP existe de verdade no sistema Operacional!
+        // 2. SEGUNDO: Agora sim podemos criar o Raw Socket e atrelar a ela.
+        
+        unsafe {
+            // Forma elegante e portátil de obter o 0x0300 (ETH_P_ALL em Big Endian)
+            let protocol = (libc::ETH_P_ALL as u16).to_be(); 
+            
+            let fd = libc::socket(AF_PACKET, SOCK_RAW, protocol as i32);
             if fd < 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -140,21 +172,23 @@ impl RawSocket {
                 io::Error::new(io::ErrorKind::InvalidInput, "Invalid interface name.")
             })?;
 
+            // Agora ele VAI encontrar o índice!
             let ifindex = libc::if_nametoindex(c_ifname.as_ptr());
-
             if ifindex == 0 {
                 libc::close(fd);
                 return Err(io::Error::new(io::ErrorKind::NotFound, "Network Interface not found!"));
             }
 
             let mut sll: libc::sockaddr_ll = mem::zeroed();
-
             sll.sll_family = AF_PACKET as u16;
             sll.sll_protocol = protocol;
             sll.sll_ifindex = ifindex as i32;
 
-            let bind_res = libc::bind(fd, &sll as *const _ as * const libc::sockaddr,
-            mem::size_of::<libc::sockaddr_ll>() as u32);
+            let bind_res = libc::bind(
+                fd, 
+                &sll as *const _ as *const libc::sockaddr,
+                mem::size_of::<libc::sockaddr_ll>() as u32
+            );
 
             if bind_res < 0 {
                 let err = io::Error::last_os_error();
@@ -162,20 +196,22 @@ impl RawSocket {
                 return Err(err);
             }
 
-            let flags = fcntl(fd, F_GETFL, 0);
+            // Configura para Non-Blocking
+            let flags = libc::fcntl(fd, F_GETFL, 0);
             if flags < 0 {
                 let err = io::Error::last_os_error();
                 libc::close(fd);
                 return Err(err);
             }
 
-            if fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 {
+            if libc::fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 {
                 let err = io::Error::last_os_error();
                 libc::close(fd);
                 return Err(err);
             }
 
-            Ok(Self { fd })
+            // Retorna a struct mantendo a interface viva (tap_file) e o socket pronto (fd)
+            Ok(Self { fd, tap_file })
         }
     }
 }
@@ -254,4 +290,10 @@ impl Write for ConnType {
             ConnType::Tcp(stream) => stream.flush()
         }
     }
+}
+#[repr(C)]
+struct Ifreq {
+    ifr_name: [u8; 16],
+    ifr_flags: libc::c_short,
+    _pad: [u8; 22],
 }
