@@ -33,6 +33,8 @@ impl<'a> Packet<'a> {
         Self { raw }
     }
 
+    //ICMP REPLY
+
     /// # fn len
     /// Function that gets the total length of the packet.
     ///

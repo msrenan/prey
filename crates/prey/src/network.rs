@@ -305,7 +305,6 @@ struct Ifreq {
 fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
     let interface = "tap0";
 
-    // 1. Verificar se a interface existe
     let exists = Command::new("ip")
         .args(["link", "show", interface])
         .stdout(Stdio::null())
@@ -320,7 +319,6 @@ fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
         println!("[PREY] :: {} already exists.", interface);
     }
 
-    // 2. Tentar adicionar o IP (Tratando "File exists" / Already addressed)
     let ip_output = Command::new("sudo")
         .args(["ip", "addr", "add", &sub_network, "dev", interface])
         .stderr(Stdio::piped()) // Captura o erro
@@ -335,20 +333,17 @@ fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // 3. Subir a interface
     Command::new("sudo")
         .args(["ip", "link", "set", interface, "up"])
         .status()?;
 
-    // 4. Lógica do IP vizinho (.2)
     let base_ip = sub_network.split_once("/").map(|(ip, _)| ip).unwrap_or(&sub_network);
     let mut parts: Vec<&str> = base_ip.split('.').collect();
     if parts.len() == 4 {
-        parts[3] = "2"; // Muda o último octeto para 2
+        parts[3] = "2"; 
     }
     let ip_dest = parts.join(".");
 
-    // 5. Neigh Replace (Idempotente, não costuma reclamar se já existe)
     let neigh_status = Command::new("sudo")
         .args([
             "ip", "neigh", "replace", &ip_dest, 
