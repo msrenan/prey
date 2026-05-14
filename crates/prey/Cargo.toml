@@ -12,4 +12,4 @@ readme = "README.md"
 
 [dependencies]
 crossbeam-queue = "0.3.12"
-libc = "1.0.0-alpha.3"
+libc = "0.2"

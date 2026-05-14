@@ -1,10 +1,9 @@
 //! # Network Module
 //! The Network Module of PREY framework contains all the communication of user's code and the network.
 //! It defines what is a connection and deals with it: Opening, managing and shutting down.
-
+#[cfg(target_os = "linux")]
 use std::fs::{File, OpenOptions};
 use std::{char, mem};
-#[cfg(target_os = "linux")]
 use std::net::{TcpStream, SocketAddr};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
@@ -162,44 +161,8 @@ impl RawSocket {
 
         // A partir desta linha, a TAP existe de verdade no sistema Operacional!
         // 2. SEGUNDO: Agora sim podemos criar o Raw Socket e atrelar a ela.
-        
+        let fd = tap_file.as_raw_fd();
         unsafe {
-            // Forma elegante e portátil de obter o 0x0300 (ETH_P_ALL em Big Endian)
-            let protocol = (libc::ETH_P_ALL as u16).to_be(); 
-            
-            let fd = libc::socket(AF_PACKET, SOCK_RAW, protocol as i32);
-            if fd < 0 {
-                return Err(io::Error::last_os_error());
-            }
-
-            let c_ifname = CString::new(interface).map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidInput, "Invalid interface name.")
-            })?;
-
-            // Agora ele VAI encontrar o índice!
-            let ifindex = libc::if_nametoindex(c_ifname.as_ptr());
-            if ifindex == 0 {
-                libc::close(fd);
-                return Err(io::Error::new(io::ErrorKind::NotFound, "Network Interface not found!"));
-            }
-
-            let mut sll: libc::sockaddr_ll = mem::zeroed();
-            sll.sll_family = AF_PACKET as u16;
-            sll.sll_protocol = protocol;
-            sll.sll_ifindex = ifindex as i32;
-
-            let bind_res = libc::bind(
-                fd, 
-                &sll as *const _ as *const libc::sockaddr,
-                mem::size_of::<libc::sockaddr_ll>() as u32
-            );
-
-            if bind_res < 0 {
-                let err = io::Error::last_os_error();
-                libc::close(fd);
-                return Err(err);
-            }
-
             // Configura para Non-Blocking
             let flags = libc::fcntl(fd, F_GETFL, 0);
             if flags < 0 {
@@ -223,18 +186,10 @@ impl RawSocket {
 impl Read for RawSocket {
     //Read implementation for the PREY Raw socket to read directly from the network board.
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        unsafe {
-            let ret = libc::recv(self.fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0);
-
-            if ret < 0 {
-                let err = io::Error::last_os_error();
-                if err.kind() == io::ErrorKind::WouldBlock {
-                    return Err(err);
-                }
-                return Err(err);
-            }
-
-            Ok(ret as usize)
+        match self.tap_file.read(buf) {
+            Ok(n) => Ok(n),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => Err(e),
+            Err(e) => Err(e) 
         }
     }
 }
@@ -242,19 +197,11 @@ impl Read for RawSocket {
 impl Write for RawSocket {
     //Write implementation for PREY Raw socket to write directly on network board.
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        unsafe {
-            let ret = libc::send(self.fd, buf.as_ptr() as *const libc::c_void, buf.len(), 0);
-
-            if ret < 0 {
-                return Err(io::Error::last_os_error());
-            }
-
-             Ok(ret as usize)
-        }
+        self.tap_file.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+        self.tap_file.flush()
     }
 }
 
@@ -333,6 +280,20 @@ fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
         }
     }
 
+    /*let mac_output = Command::new("sudo")
+        .args(["ip", "link", "set", "dev", interface, "address", "AA:BB:CC:DD:EE:FF"])
+        .stderr(Stdio::piped()) // Captura o erro
+        .output()?;
+
+    if !mac_output.status.success() {
+        let err_msg = String::from_utf8_lossy(&mac_output.stderr);
+        if err_msg.contains("File exists") {
+            println!("[PREY] :: {} is already addressed.", interface);
+        } else {
+            eprintln!("[PREY] :: error setting MAC: {}", err_msg.trim());
+        }
+    }*/
+
     Command::new("sudo")
         .args(["ip", "link", "set", interface, "up"])
         .status()?;
@@ -340,11 +301,11 @@ fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
     let base_ip = sub_network.split_once("/").map(|(ip, _)| ip).unwrap_or(&sub_network);
     let mut parts: Vec<&str> = base_ip.split('.').collect();
     if parts.len() == 4 {
-        parts[3] = "2"; 
+        parts[3] = "1"; 
     }
     let ip_dest = parts.join(".");
 
-    let neigh_status = Command::new("sudo")
+    /*let neigh_status = Command::new("sudo")
         .args([
             "ip", "neigh", "replace", &ip_dest, 
             "lladdr", "aa:bb:cc:dd:ee:ff", 
@@ -352,12 +313,12 @@ fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
         ])
         .status()?;
 
-    if neigh_status.success() {
-        println!("[PREY] :: routing for {} via {} is active.", ip_dest, interface);
-        println!("[PREY] :: tap0 interface was successfully synchronized!");
-    } else {
+    if !neigh_status.success() {
         return Err("[PREY] :: failed to set neighbor table. Shutting down!".into());
-    }
+    }*/
+
+    println!("[PREY] :: routing for {} via {} is active.", ip_dest, interface);
+    println!("[PREY] :: tap0 interface was successfully synchronized!");
 
     Ok(())
 }
