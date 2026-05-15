@@ -3,14 +3,12 @@
 //! It defines what is a connection and deals with it: Opening, managing and shutting down.
 #[cfg(target_os = "linux")]
 use std::fs::{File, OpenOptions};
-use std::{char, mem};
 use std::net::{TcpStream, SocketAddr};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
 use crate::buffer::Buffer;
-use libc::{AF_PACKET, F_GETFL, F_SETFL, O_NONBLOCK, SOCK_RAW, fcntl, seteuid, socket};
+use libc::{F_GETFL, F_SETFL, O_NONBLOCK};
 use std::os::unix::io::RawFd;
-use std::ffi::CString;
 use std::process::{Command, Stdio};
 use std::error::Error;
 
@@ -139,7 +137,6 @@ impl RawSocket {
     pub fn new(interface: &str, sub_network: String) -> io::Result<Self> {
         setup_tap_interface(sub_network).unwrap();
 
-        // 1. PRIMEIRO: Criamos e registramos a interface virtual no Kernel
         let tap_file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -147,7 +144,6 @@ impl RawSocket {
 
         let mut ifr: Ifreq = unsafe { std::mem::zeroed() };
         
-        // Converte o nome passado por parâmetro (ex: "tap0")
         let name_bytes = interface.as_bytes();
         let len = std::cmp::min(name_bytes.len(), 15);
         ifr.ifr_name[..len].copy_from_slice(&name_bytes[..len]);
@@ -159,11 +155,9 @@ impl RawSocket {
             }
         }
 
-        // A partir desta linha, a TAP existe de verdade no sistema Operacional!
-        // 2. SEGUNDO: Agora sim podemos criar o Raw Socket e atrelar a ela.
         let fd = tap_file.as_raw_fd();
         unsafe {
-            // Configura para Non-Blocking
+
             let flags = libc::fcntl(fd, F_GETFL, 0);
             if flags < 0 {
                 let err = io::Error::last_os_error();
@@ -177,7 +171,6 @@ impl RawSocket {
                 return Err(err);
             }
 
-            // Retorna a struct mantendo a interface viva (tap_file) e o socket pronto (fd)
             Ok(Self { fd, tap_file })
         }
     }
@@ -242,6 +235,14 @@ impl Write for ConnType {
         }
     }
 }
+
+/// # Ifreq
+/// Struct that represents a Interface Request for kernel creation and usage of tap0.
+/// 
+/// # Fields
+/// - ifr_name: `[u8; 16]` - Interface name
+/// - ifr_flags: `libc::c_short` - Interface flags
+/// - _pad: `[u8; 22]` - Padding to match original C struct
 #[repr(C)]
 struct Ifreq {
     ifr_name: [u8; 16],
@@ -249,6 +250,15 @@ struct Ifreq {
     _pad: [u8; 22],
 }
 
+/// # fn setup_tap_interface
+/// Function that creates and do basic tap0 configuration, eliminating the need of typing
+/// commands manually.
+/// 
+/// # Params
+/// - sub_network: `String` - The subnetwork tap0 should work on (ex: 172.16.50.1/24)
+/// 
+/// # Returns
+/// A `Result<(), Box<dyn Error>>` that represents the success or not of the **tap0** creation.
 fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
     let interface = "tap0";
 
@@ -268,7 +278,7 @@ fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
 
     let ip_output = Command::new("sudo")
         .args(["ip", "addr", "add", &sub_network, "dev", interface])
-        .stderr(Stdio::piped()) // Captura o erro
+        .stderr(Stdio::piped()) 
         .output()?;
 
     if !ip_output.status.success() {
@@ -280,20 +290,6 @@ fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    /*let mac_output = Command::new("sudo")
-        .args(["ip", "link", "set", "dev", interface, "address", "AA:BB:CC:DD:EE:FF"])
-        .stderr(Stdio::piped()) // Captura o erro
-        .output()?;
-
-    if !mac_output.status.success() {
-        let err_msg = String::from_utf8_lossy(&mac_output.stderr);
-        if err_msg.contains("File exists") {
-            println!("[PREY] :: {} is already addressed.", interface);
-        } else {
-            eprintln!("[PREY] :: error setting MAC: {}", err_msg.trim());
-        }
-    }*/
-
     Command::new("sudo")
         .args(["ip", "link", "set", interface, "up"])
         .status()?;
@@ -304,18 +300,6 @@ fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
         parts[3] = "1"; 
     }
     let ip_dest = parts.join(".");
-
-    /*let neigh_status = Command::new("sudo")
-        .args([
-            "ip", "neigh", "replace", &ip_dest, 
-            "lladdr", "aa:bb:cc:dd:ee:ff", 
-            "dev", interface, "nud", "permanent"
-        ])
-        .status()?;
-
-    if !neigh_status.success() {
-        return Err("[PREY] :: failed to set neighbor table. Shutting down!".into());
-    }*/
 
     println!("[PREY] :: routing for {} via {} is active.", ip_dest, interface);
     println!("[PREY] :: tap0 interface was successfully synchronized!");

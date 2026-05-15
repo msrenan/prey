@@ -59,6 +59,15 @@ impl<'a> Packet<'a> {
         self.raw.is_empty()
     }
 
+    /// # fn ethernet_header
+    /// Function that extracts the Ethernet Header of a Packet, if it has one.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated packet.
+    /// 
+    /// # Returns
+    /// A `Result<(EthernetHeader, usize), &'static str>` containing either a tuple with the Ethernet Header
+    /// object and its' size, or a static error message.
     pub fn ethernet_header(&self) -> Result<(EthernetHeader, usize), &'static str> {
         match EthernetHeader::parse(self.raw) {
             Ok(h) => Ok((h, 14)),
@@ -66,6 +75,15 @@ impl<'a> Packet<'a> {
         }
     }
 
+    /// # fn l3_header
+    /// Function that extracts the layer 3 header of a Packet, if it has one.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated packet.
+    /// 
+    /// # Returns
+    /// A `Result<(L3, usize), &'static str>` containing either a tuple with the L3 header enum
+    /// and the header's size, or a static error message.
     pub fn l3_header(&self) -> Result<(L3, usize), &'static str> {
         let (eth, offset) = self.ethernet_header().unwrap();
         let current_offset = 0 + offset;
@@ -85,6 +103,15 @@ impl<'a> Packet<'a> {
         }
     }
 
+    /// # fn l4_header
+    /// Function that extracts the layer 4 header of a Packet, if it has one.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated packet.
+    /// 
+    /// # Returns
+    /// A `Result<(L4, usize), &'static str>` containing either a tuple with the L4 header enum
+    /// and the header's size, or a static error message.
     pub fn l4_header(&self) -> Result<(L4, usize), &'static str> {
         let (_, eth_off) = self.ethernet_header().unwrap();
         let (l3, l3_off) = self.l3_header().unwrap();
@@ -112,7 +139,33 @@ impl<'a> Packet<'a> {
             IpProtocol::Unknown(n) => Ok((L4::Unknown(n), 0))
         }
     }
+
+    /// # fn headers
+    /// Function that returns packet's headers off all layers that are in packet.
+    /// 
+    /// # Params
+    /// &self - Reference to the manipulated packet.
+    /// 
+    /// # Returns
+    /// A `Result<(EthernetHeader, L3, L4), &'static str>` containing either a tuple with the
+    /// Ethernet Header object, the L3 and L4 enums of the packet, or a static error message.
+    pub fn headers(&self) -> Result<(EthernetHeader, L3, L4), &'static str> {
+        let eth = self.ethernet_header()?.0;
+        let l3 = self.l3_header()?.0;
+        let l4 = self.l4_header()?.0;
+
+        Ok((eth, l3, l4))
+    }
     
+    /// # fn payload
+    /// Function that extracts packet's payload.
+    /// 
+    /// # Params
+    /// &self - Reference to the manipulated packet.
+    /// 
+    /// # Returns
+    /// A `Result<&'a [u8], &'static str>` containing either the slice of bytes that represents packet's paylaod
+    /// or a static error message.
     pub fn payload(&self) -> Result<&'a [u8], &'static str> {
         let (_, eth_off) = match self.ethernet_header() {
             Ok(x) => x,
@@ -146,8 +199,17 @@ impl<'a> Packet<'a> {
         }
     }
 
+    /// # fn build_arp_reply
+    /// Function that builds a arp reply packet from a received arp request packet.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated buffer.
+    /// - buf: `&mut [u8]` - A mutable reference to buffer's writable slice of bytes.
+    /// 
+    /// # Returns
+    /// A `Result<usize, &'static str>` containing either the amount of bytes written or a
+    /// static error message.
     pub fn build_arp_reply(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
-        let (eth, _) = self.ethernet_header().unwrap();
         let (l3, _) = self.l3_header().unwrap();
         let arp = match l3 {
             L3::ARP(h) => h,
@@ -650,6 +712,14 @@ impl<'a> fmt::Display for Packet<'a> {
 
 
 impl EthernetHeader {
+    /// # fn parse
+    /// Function that parses a slice of bytes into a EthernetHeader object.
+    /// 
+    /// # Params
+    /// - raw: `&[u8]` - Reference to the slice of bytes that will be parsed.
+    /// 
+    /// # Returns
+    /// A `Result<Self, &'static str>` containing either the new EthernetHeader object, or a static error message.
     pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
         if raw.len() < 14 {
             return Err("Packet is too short to have an Ethernet Header");
@@ -670,6 +740,14 @@ impl EthernetHeader {
         })
     }
 
+    /// # fn serialize
+    /// Function that turns a EthernetHeader object back into a byte sequence.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated EthernetHeader object.
+    /// 
+    /// # Returns
+    /// A `Vec<u8>` containing the EthernetHeader object as bytes.
     pub fn serialize(&self) -> Vec<u8> {
         let mut h_b = Vec::with_capacity(14);
 
@@ -682,6 +760,14 @@ impl EthernetHeader {
 }
 
 impl ArpHeader {
+    /// # fn parse
+    /// Function that parses a slice of bytes into a ArpHeader object.
+    /// 
+    /// # Params
+    /// - raw: `&[u8]` - Reference to the slice of bytes that will be parsed.
+    /// 
+    /// # Returns
+    /// A `Result<Self, &'static str>` containing either the new ArpHeader object, or a static error message.
     pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
         if raw.len() < 28 {
             return Err("Packet is too short to have an ARP Header");
@@ -713,6 +799,14 @@ impl ArpHeader {
 
     }
 
+    /// # fn serialize
+    /// Function that turns a ArpHeader object back into a byte sequence.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated ArpHeader object.
+    /// 
+    /// # Returns
+    /// A `Vec<u8>` containing the ArpHeader object as bytes.
     pub fn serialize(&self) -> Vec<u8> {
         let mut h_b = Vec::with_capacity(28);
 
@@ -731,6 +825,15 @@ impl ArpHeader {
 }
 
 impl IPv4Header {
+
+    /// # fn parse
+    /// Function that parses a slice of bytes into a Ipv4Header object.
+    /// 
+    /// # Params
+    /// - raw: `&[u8]` - Reference to the slice of bytes that will be parsed.
+    /// 
+    /// # Returns
+    /// A `Result<Self, &'static str>` containing either the new Ipv4Header object, or a static error message.
     pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
         if raw.len() < 20 {
             return Err("Packet is too short to have an IPv4 Header");
@@ -775,6 +878,14 @@ impl IPv4Header {
 }
 
 impl IPv6Header {
+    /// # fn parse
+    /// Function that parses a slice of bytes into a Ipv6Header object.
+    /// 
+    /// # Params
+    /// - raw: `&[u8]` - Reference to the slice of bytes that will be parsed.
+    /// 
+    /// # Returns
+    /// A `Result<Self, &'static str>` containing either the new Ipv6Header object, or a static error message.
     pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
 
         if raw.len() < 40 {
@@ -810,6 +921,14 @@ impl IPv6Header {
 }
 
 impl IcmpHeader {
+    /// # fn parse
+    /// Function that parses a slice of bytes into a IcmpHeader object.
+    /// 
+    /// # Params
+    /// - raw: `&[u8]` - Reference to the slice of bytes that will be parsed.
+    /// 
+    /// # Returns
+    /// A `Result<Self, &'static str>` containing either the new IcmpHeader object, or a static error message.
     pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
 
         if raw.len() < 8 {
@@ -835,6 +954,14 @@ impl IcmpHeader {
 }
 
 impl UdpHeader {
+    /// # fn parse
+    /// Function that parses a slice of bytes into a UdpHeader object.
+    /// 
+    /// # Params
+    /// - raw: `&[u8]` - Reference to the slice of bytes that will be parsed.
+    /// 
+    /// # Returns
+    /// A `Result<Self, &'static str>` containing either the new UdpHeader object, or a static error message.
     pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
         if raw.len() < 8 {
             return Err("This packet is too short to have an UDP Header");
@@ -855,6 +982,14 @@ impl UdpHeader {
 }
 
 impl TcpHeader {
+    /// # fn parse
+    /// Function that parses a slice of bytes into a TcpHeader object.
+    /// 
+    /// # Params
+    /// - raw: `&[u8]` - Reference to the slice of bytes that will be parsed.
+    /// 
+    /// # Returns
+    /// A `Result<Self, &'static str>` containing either the new TcpHeader object, or a static error message.
     pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
         if raw.len() < 20 {
             return Err("Packet is too short to have a TCP Header");
@@ -890,6 +1025,14 @@ impl TcpHeader {
 }
 
 impl EtherType {
+    /// # fn serialize
+    /// Function that turns each EtherType enum types back into its bytes.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated EtherType enum.
+    /// 
+    /// # Returns
+    /// A `u16` that represents a type of EtherType enum as bytes.
     pub fn serialize(ether_type: EtherType) -> u16 {
         match ether_type {
             EtherType::ARP => 0x0806,
@@ -901,6 +1044,14 @@ impl EtherType {
 }
 
 impl IpProtocol {
+    /// # fn serialize
+    /// Function that turns each IpProtocol enum types back into its bytes.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated IpProtocol enum.
+    /// 
+    /// # Returns
+    /// A `u8` that represents a type of IpProtocol enum  as bytes.
     pub fn serialize(protocol: IpProtocol, version: u8) -> u8 {
         match protocol {
             IpProtocol::ICMP => {
@@ -917,7 +1068,16 @@ impl IpProtocol {
     }
 }
 
+
 impl ArpOperation {
+    /// # fn serialize
+    /// Function that turns each ArpOperation enum types back into its bytes.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated ArpOperation enum.
+    /// 
+    /// # Returns
+    /// A `u8` that represents a type of ArpOperation enum  as bytes.
     pub fn serialize(op: ArpOperation) -> u16 {
         match op {
             ArpOperation::Request => 0x0001 ,
