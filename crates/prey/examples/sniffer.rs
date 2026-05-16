@@ -1,6 +1,7 @@
 
 use std::{io, net::{Ipv4Addr, SocketAddr, SocketAddrV4}};
 
+use libc::name_t;
 use prey::{buffer::BufferPool, network::{Connection, RawSocket}, packet::{ArpOperation, IpProtocol, L3, Packet}};
 
 const MY_IP: Ipv4Addr = Ipv4Addr::new(172, 16, 50, 2);
@@ -30,7 +31,14 @@ fn main() {
 
                 let packet = Packet::new(conn.read_buffer.data());
 
-                let (l3, _) = packet.l3_header().unwrap();
+                let (l3, _) = match packet.l3_header() {
+                    Ok(data) => data,
+                    Err(e) => {
+                        println!("Error -> {}", e);
+                        conn.read_buffer.clear();
+                        continue;
+                    }
+                };
                 let (eth, _) = packet.ethernet_header().unwrap();
                 if let L3::ARP(arp) = l3 {
                     if arp.op == ArpOperation::Request {
@@ -68,7 +76,6 @@ fn main() {
 
                                 println!("Sending ARP Reply!");
                                 conn.send().unwrap();
-                                conn.write_buffer.clear();
                             }
                         }
 
@@ -76,7 +83,28 @@ fn main() {
                 } else if let L3::IPv4(ipv4, protocol) = l3 {
                     if protocol == IpProtocol::ICMP {
                         println!("Its a ICMP packet!");
-                        println!("{}", packet);
+                        //println!("{}", packet);
+                        println!("{:02X?}", packet.raw);
+
+                        let mut response = pool.acquire().unwrap();
+
+                        match packet.build_icmp_reply(response.as_mut_slice()) {
+                            Ok(n) => {
+                                println!("Works! ({} bytes written!)", n);
+                                response.advance(n);
+                                let writable = conn.write_buffer.as_mut_slice();
+                                writable[..response.data().len()].copy_from_slice(&response.data());
+                                conn.write_buffer.advance(response.data().len());
+                                println!("Sending ping reply!");
+                                conn.send().unwrap();
+                            },
+                            Err(e) => {
+                                println!("An error have ocurred: {}", e);
+                                conn.read_buffer.clear();
+                                continue;
+                            }
+                        };
+
                     }
                 }
 
@@ -89,7 +117,6 @@ fn main() {
                 println!("Error: {}", e);
             }
         }
-
         conn.read_buffer.clear();
     }
 
