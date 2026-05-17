@@ -93,8 +93,7 @@ impl<'a> Packet<'a> {
             EtherType::ARP => Ok((L3::ARP(ArpHeader::parse(raw).unwrap()), 28)),
             EtherType::IPv4 => {
                 let ipv4 = IPv4Header::parse(raw).unwrap();
-                println!("[PREY] :: Checking IPv4 Checksum!");
-                if calculate_checksum(raw) != 0x0000 {
+                if calculate_checksum(&ipv4.serialize()) != 0x0000 {
                     return Err("Invalid Packet: IPv4 checksum error.");
                 }
                 Ok((L3::IPv4(ipv4, ipv4.protocol), ipv4.ihl as usize))
@@ -117,11 +116,16 @@ impl<'a> Packet<'a> {
     /// A `Result<(L4, usize), &'static str>` containing either a tuple with the L4 header enum
     /// and the header's size, or a static error message.
     pub fn l4_header(&self) -> Result<(L4, usize), &'static str> {
-        let (_, eth_off) = self.ethernet_header().unwrap();
-        let (l3, l3_off) = self.l3_header().unwrap();
+        let (_, eth_off) = match self.ethernet_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+        let (l3, l3_off) = match self.l3_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
 
         let current_offset = 0 + eth_off + l3_off;
-        println!("[PREY] :: current_offset={}", current_offset);
         let raw = &self.raw[current_offset..];
 
         match l3 {
@@ -129,8 +133,6 @@ impl<'a> Packet<'a> {
                 match protocol {
                     IpProtocol::ICMP => {
                         let icmp = IcmpHeader::parse(raw).unwrap();
-                        println!("[PREY] :: {}", icmp);
-                        println!("[PREY] :: Checking ICMPv4 Checksum!");
                         if calculate_icmp_checksum(&raw) != 0x0000 {
                             return Err("Invalid Packet: ICMP Checksum Error.");
                         }
@@ -138,16 +140,14 @@ impl<'a> Packet<'a> {
                     },
                     IpProtocol::TCP => {
                         let tcp = TcpHeader::parse(raw).unwrap();
-                        println!("[PREY] :: Checking TCPv4 Checksum!");
-                        if calculate_l4_checksum_v4(l3, L4::TCP(tcp), &raw[(tcp.data_offset as usize)..]) != 0x0000 {
+                        if calculate_l4_checksum_v4(l3, raw) != 0x0000 {
                             return Err("Invalid Packet: TCP Checksum Error.");
                         } 
                         Ok((L4::TCP(tcp), tcp.data_offset as usize))
                     },
                     IpProtocol::UDP => {
                         let udp = UdpHeader::parse(raw).unwrap();
-                        println!("[PREY] :: Checking UDPv4 Checksum!");
-                        if calculate_l4_checksum_v4(l3, L4::UDP(udp), &raw[8..]) != 0x0000 {
+                        if calculate_l4_checksum_v4(l3, raw) != 0x0000 {
                             return Err("Invalid Packet: UDP Checksum Error.");
                         } 
                         Ok((L4::UDP(udp), 8))
@@ -162,7 +162,6 @@ impl<'a> Packet<'a> {
                 match protocol {
                     IpProtocol::ICMP => {
                         let icmp = IcmpHeader::parse(raw).unwrap();
-                        println!("[PREY] :: Checking ICMPv6 Checksum!");
                         if calculate_l4_checksum_v6(&src_ip, &dst_ip, next_header, L4::ICMP(icmp), &raw) != 0x0000 {
                             return Err("Invalid Packet: ICMPv6 Checksum Error.");
                         }
@@ -170,7 +169,6 @@ impl<'a> Packet<'a> {
                     },
                     IpProtocol::TCP => {
                         let tcp = TcpHeader::parse(raw).unwrap();
-                        println!("[PREY] :: Checking TCPv6 Checksum!");
                         if calculate_l4_checksum_v6(&src_ip, &dst_ip, next_header, L4::TCP(tcp), &raw[(tcp.data_offset as usize)..]) != 0x0000 {
                             return Err("Invalid Packet: TCPv6 Checksum Error.");
                         } 
@@ -178,7 +176,6 @@ impl<'a> Packet<'a> {
                     },
                     IpProtocol::UDP => {
                         let udp = UdpHeader::parse(raw).unwrap();
-                        println!("[PREY] :: Checking UDPv6 Checksum!");
                         if calculate_l4_checksum_v6(&src_ip, &dst_ip, next_header, L4::UDP(udp), &raw[8..]) != 0x0000 {
                             return Err("Invalid Packet: UDPv6 Checksum Error.");
                         } 
@@ -247,7 +244,6 @@ impl<'a> Packet<'a> {
         if self.len() >= current_offset {
             Ok(&self.raw[current_offset..])
         } else {
-            println!("Packet is too short ({} | {} [0, {}, {}, {}])", current_offset, self.len(), eth_off, l3_off, l4_off);
             Err("Packet is too short.")
         }
     }
@@ -298,15 +294,13 @@ impl<'a> Packet<'a> {
     }
 
     pub fn build_icmp_reply(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
-        let mut packet: Vec<u8> = Vec::new();
+        let packet: Vec<u8> = Vec::new();
 
         let (eth, _) = self.ethernet_header().unwrap();
         let (l3, _) = self.l3_header().unwrap();
         match l3 {
             L3::IPv4(ipv4, protocol) => {
-                println!("{}", ipv4);
                 if protocol == IpProtocol::ICMP {
-                    println!("[PREY] :: It is a ICMP packet!");
                     let payload = match self.payload() {
                         Ok(data) => data,
                         Err(e) => { return Err(e); }
@@ -318,7 +312,6 @@ impl<'a> Packet<'a> {
                     };
 
                     if let L4::ICMP(header) = l4 {
-                        println!("{}", header);
 
                         let mut packet: Vec<u8> = Vec::new();
 
@@ -372,12 +365,10 @@ impl<'a> Packet<'a> {
                 return Err("An error ocurred while building ICMP reply.");
             }
             L3::IPv6(ipv6, protocol) => {
-                println!("{}", ipv6);
                 if protocol == IpProtocol::ICMP {
-                    println!("It is a ICMP packet!");
                     let l4 = self.l4_header().unwrap().0;
                     if let L4::ICMP(header) = l4 {
-                        println!("{}", header);
+                        println!("[PREY] :: ICMPv6 reply not finished.");
                     }
                 }
             },
@@ -385,6 +376,375 @@ impl<'a> Packet<'a> {
         }
 
         Ok(packet.len())
+    }
+
+    pub fn build_tcp_syn_ack(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
+        let mut packet: Vec<u8> = Vec::new();
+
+        let (eth, _) = match self.ethernet_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+        let (l3, _) = match self.l3_header() {
+            Ok(data) => data,
+            Err(e) => {return Err(e); }
+        };
+
+        match l3 {
+            L3::IPv4(ipv4, protocol) => {
+                if protocol == IpProtocol::TCP {
+
+                    let (l4, _) = match self.l4_header() {
+                        Ok(data) => data,
+                        Err(e) => { return Err(e); }
+                    };
+                    let payload = match self.payload() {
+                        Ok(data) => data,
+                        Err(e) => { return Err(e); }
+                    };
+
+                    if let L4::TCP(tcp) = l4 {
+
+                        let r_eth = EthernetHeader {
+                            dst_mac: eth.src_mac,
+                            src_mac: eth.dst_mac,
+                            ether_type: EtherType::IPv4
+                        };
+
+                        packet.extend_from_slice(&r_eth.serialize());
+
+                        let mut r_ipv4 = IPv4Header {
+                            checksum: 0,
+                            version: ipv4.version,
+                            ihl: ipv4.ihl,
+                            tos: ipv4.tos,
+                            total_len: 40,
+                            id: ipv4.id + 2,
+                            flags: ipv4.flags,
+                            ttl: 64,
+                            protocol: IpProtocol::TCP,
+                            src_ip: ipv4.dst_ip,
+                            dst_ip: ipv4.src_ip
+                        };
+
+                        r_ipv4.checksum = calculate_checksum_v4(&mut r_ipv4);
+                        packet.extend_from_slice(&r_ipv4.serialize());
+
+                        let mut r_tcp = TcpHeader {
+                            ack_number: tcp.seq_number + 1,
+                            seq_number: tcp.seq_number + 25,
+                            src_port: tcp.dst_port,
+                            dst_port: tcp.src_port,
+                            data_offset: 20,
+                            flags: 0x12,
+                            window_size: 64240,
+                            checksum: 0,
+                            urgent_pointer: 0
+                        };
+
+                        let mut l4_payload: Vec<u8> = Vec::new();
+
+                        l4_payload.extend_from_slice(&r_tcp.serialize());
+                        l4_payload.extend_from_slice(payload);
+
+                        r_tcp.checksum = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip,
+                            protocol, &l4_payload);
+
+                        packet.extend_from_slice(&r_tcp.serialize());
+
+                        buf[..packet.len()].copy_from_slice(&packet);
+                        
+                        Ok(packet.len())
+                    } else {
+                        Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
+                    }
+                } else {
+                    Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
+                }
+            },
+            L3::IPv6(ipv6, protocol) => {
+                Err("Still not finished.")
+            },
+            _ => Err("You can't build a TCP SYN-ACK from a non-TCP packet, and TCP only existis for IPv4/6 L3!")
+        }
+
+    }
+
+    pub fn build_tcp_ack(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
+        let mut packet: Vec<u8> = Vec::new();
+
+        let (eth, _) = match self.ethernet_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+        let (l3, _) = match self.l3_header() {
+            Ok(data) => data,
+            Err(e) => {return Err(e); }
+        };
+
+        match l3 {
+            L3::IPv4(ipv4, protocol) => {
+                if protocol == IpProtocol::TCP {
+
+                    let (l4, _) = match self.l4_header() {
+                        Ok(data) => data,
+                        Err(e) => { return Err(e); }
+                    };
+                    let payload = match self.payload() {
+                        Ok(data) => data,
+                        Err(e) => { return Err(e); }
+                    };
+
+                    if let L4::TCP(tcp) = l4 {
+
+                        let r_eth = EthernetHeader {
+                            dst_mac: eth.src_mac,
+                            src_mac: eth.dst_mac,
+                            ether_type: EtherType::IPv4
+                        };
+
+                        packet.extend_from_slice(&r_eth.serialize());
+
+                        let mut r_ipv4 = IPv4Header {
+                            checksum: 0,
+                            version: ipv4.version,
+                            ihl: ipv4.ihl,
+                            tos: ipv4.tos,
+                            total_len: 40,
+                            id: ipv4.id + 2,
+                            flags: ipv4.flags,
+                            ttl: 64,
+                            protocol: IpProtocol::TCP,
+                            src_ip: ipv4.dst_ip,
+                            dst_ip: ipv4.src_ip
+                        };
+
+                        r_ipv4.checksum = calculate_checksum_v4(&mut r_ipv4);
+                        packet.extend_from_slice(&r_ipv4.serialize());
+
+                        let mut r_tcp = TcpHeader {
+                            ack_number: tcp.seq_number + payload.len() as u32,
+                            seq_number: tcp.ack_number,
+                            src_port: tcp.dst_port,
+                            dst_port: tcp.src_port,
+                            data_offset: 20,
+                            flags: TcpFlags::serialize(&[TcpFlags::ACK]),
+                            window_size: 64240,
+                            checksum: 0,
+                            urgent_pointer: 0
+                        };
+
+                        let mut l4_payload: Vec<u8> = Vec::new();
+
+                        l4_payload.extend_from_slice(&r_tcp.serialize());
+                        l4_payload.extend_from_slice(payload);
+
+                        r_tcp.checksum = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip,
+                            protocol, &l4_payload);
+
+                        packet.extend_from_slice(&r_tcp.serialize());
+
+                        buf[..packet.len()].copy_from_slice(&packet);
+                        
+                        Ok(packet.len())
+                    } else {
+                        Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
+                    }
+                } else {
+                    Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
+                }
+            },
+            L3::IPv6(ipv6, protocol) => {
+                Err("Still not finished.")
+            },
+            _ => Err("You can't build a TCP SYN-ACK from a non-TCP packet, and TCP only existis for IPv4/6 L3!")
+        }
+
+    }
+
+    pub fn build_tcp_fin_ack(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
+        let mut packet: Vec<u8> = Vec::new();
+
+        let (eth, _) = match self.ethernet_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+        let (l3, _) = match self.l3_header() {
+            Ok(data) => data,
+            Err(e) => {return Err(e); }
+        };
+
+        match l3 {
+            L3::IPv4(ipv4, protocol) => {
+                if protocol == IpProtocol::TCP {
+
+                    let (l4, _) = match self.l4_header() {
+                        Ok(data) => data,
+                        Err(e) => { return Err(e); }
+                    };
+                    let payload = match self.payload() {
+                        Ok(data) => data,
+                        Err(e) => { return Err(e); }
+                    };
+
+                    if let L4::TCP(tcp) = l4 {
+
+                        let r_eth = EthernetHeader {
+                            dst_mac: eth.src_mac,
+                            src_mac: eth.dst_mac,
+                            ether_type: EtherType::IPv4
+                        };
+
+                        packet.extend_from_slice(&r_eth.serialize());
+
+                        let mut r_ipv4 = IPv4Header {
+                            checksum: 0,
+                            version: ipv4.version,
+                            ihl: ipv4.ihl,
+                            tos: ipv4.tos,
+                            total_len: 40,
+                            id: ipv4.id + 2,
+                            flags: ipv4.flags,
+                            ttl: 64,
+                            protocol: IpProtocol::TCP,
+                            src_ip: ipv4.dst_ip,
+                            dst_ip: ipv4.src_ip
+                        };
+
+                        r_ipv4.checksum = calculate_checksum_v4(&mut r_ipv4);
+                        packet.extend_from_slice(&r_ipv4.serialize());
+
+                        let mut r_tcp = TcpHeader {
+                            ack_number: tcp.seq_number + 1 + payload.len() as u32,
+                            seq_number: tcp.ack_number,
+                            src_port: tcp.dst_port,
+                            dst_port: tcp.src_port,
+                            data_offset: 20,
+                            flags: TcpFlags::serialize(&[TcpFlags::FIN, TcpFlags::ACK]),
+                            window_size: 64240,
+                            checksum: 0,
+                            urgent_pointer: 0
+                        };
+
+                        let mut l4_payload: Vec<u8> = Vec::new();
+
+                        l4_payload.extend_from_slice(&r_tcp.serialize());
+                        l4_payload.extend_from_slice(payload);
+
+                        r_tcp.checksum = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip,
+                            protocol, &l4_payload);
+
+                        packet.extend_from_slice(&r_tcp.serialize());
+
+                        buf[..packet.len()].copy_from_slice(&packet);
+                        
+                        Ok(packet.len())
+                    } else {
+                        Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
+                    }
+                } else {
+                    Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
+                }
+            },
+            L3::IPv6(ipv6, protocol) => {
+                Err("Still not finished.")
+            },
+            _ => Err("You can't build a TCP SYN-ACK from a non-TCP packet, and TCP only existis for IPv4/6 L3!")
+        }
+
+    }
+
+    pub fn build_tcp_response(&self, buf: &mut [u8], response: &[u8]) -> Result<usize, &'static str> {
+        let mut packet: Vec<u8> = Vec::new();
+
+        let (eth, _) = match self.ethernet_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+        let (l3, _) = match self.l3_header() {
+            Ok(data) => data,
+            Err(e) => {return Err(e); }
+        };
+
+        match l3 {
+            L3::IPv4(ipv4, protocol) => {
+                if protocol == IpProtocol::TCP {
+
+                    let (l4, _) = match self.l4_header() {
+                        Ok(data) => data,
+                        Err(e) => { return Err(e); }
+                    };
+                    let payload = match self.payload() {
+                        Ok(data) => data,
+                        Err(e) => { return Err(e); }
+                    };
+
+                    if let L4::TCP(tcp) = l4 {
+
+                        let r_eth = EthernetHeader {
+                            dst_mac: eth.src_mac,
+                            src_mac: eth.dst_mac,
+                            ether_type: EtherType::IPv4
+                        };
+
+                        packet.extend_from_slice(&r_eth.serialize());
+
+                        let mut r_ipv4 = IPv4Header {
+                            checksum: 0,
+                            version: ipv4.version,
+                            ihl: ipv4.ihl,
+                            tos: ipv4.tos,
+                            total_len: 40 + response.len() as u16,
+                            id: ipv4.id + 2,
+                            flags: ipv4.flags,
+                            ttl: 64,
+                            protocol: IpProtocol::TCP,
+                            src_ip: ipv4.dst_ip,
+                            dst_ip: ipv4.src_ip
+                        };
+
+                        r_ipv4.checksum = calculate_checksum_v4(&mut r_ipv4);
+                        packet.extend_from_slice(&r_ipv4.serialize());
+
+                        let mut r_tcp = TcpHeader {
+                            ack_number: tcp.seq_number + payload.len() as u32,
+                            seq_number: tcp.ack_number,
+                            src_port: tcp.dst_port,
+                            dst_port: tcp.src_port,
+                            data_offset: 20,
+                            flags: TcpFlags::serialize(&[TcpFlags::PSH, TcpFlags::ACK]),
+                            window_size: 64240,
+                            checksum: 0,
+                            urgent_pointer: 0
+                        };
+
+                        let mut l4_payload: Vec<u8> = Vec::new();
+
+                        l4_payload.extend_from_slice(&r_tcp.serialize());
+                        l4_payload.extend_from_slice(&response);
+
+                        r_tcp.checksum = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip,
+                            protocol, &l4_payload);
+
+                        packet.extend_from_slice(&r_tcp.serialize());
+                        packet.extend_from_slice(&response);
+
+                        buf[..packet.len()].copy_from_slice(&packet);
+                        
+                        Ok(packet.len())
+                    } else {
+                        Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
+                    }
+                } else {
+                    Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
+                }
+            },
+            L3::IPv6(ipv6, protocol) => {
+                Err("Still not finished.")
+            },
+            _ => Err("You can't build a TCP SYN-ACK from a non-TCP packet, and TCP only existis for IPv4/6 L3!")
+        }
+
     }
 }
 
@@ -550,6 +910,17 @@ pub struct UdpHeader {
     pub checksum: u16,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TcpFlags {
+    SYN,
+    ACK,
+    FIN,
+    RST,
+    PSH,
+    URG,
+    Unknown(u8)
+}
+
 /// # TcpHeader
 /// Struct that defines and separates all information of packet's TCP Header.
 /// 
@@ -636,6 +1007,19 @@ pub enum L4 {
 }
 
 //Trait implementation for PREY structs and enums
+impl From<u8> for TcpFlags {
+    fn from(value: u8) -> Self {
+        match value {
+            0x01 => TcpFlags::FIN,
+            0x02 => TcpFlags::SYN,
+            0x04 => TcpFlags::RST,
+            0x08 => TcpFlags::PSH,
+            0x10 => TcpFlags::ACK,
+            0x20 => TcpFlags::URG,
+            _ => TcpFlags::Unknown(value)
+        }
+    }
+}
 
 impl From<u8> for IpProtocol {
     fn from(value: u8) -> Self {
@@ -680,6 +1064,20 @@ impl From<u8> for IcmpType {
             8 => IcmpType::Request,
             0 => IcmpType::Reply,
             _ => IcmpType::Unknown(value)
+        }
+    }
+}
+
+impl fmt::Display for TcpFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TcpFlags::ACK => write!(f, "ACK"),
+            TcpFlags::SYN => write!(f, "SYN"),
+            TcpFlags::FIN => write!(f, "FIN"),
+            TcpFlags::PSH => write!(f, "PSH"),
+            TcpFlags::RST => write!(f, "RST"),
+            TcpFlags::URG => write!(f, "URG"),
+            TcpFlags::Unknown(value) => write!(f, "Unmapped flag: {:02X}", value)
         }
     }
 }
@@ -786,8 +1184,8 @@ impl fmt::Display for ArpHeader {
 impl fmt::Display for TcpHeader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f,
-            "{{ TcpHeader: *src_port={} *dst_port={} *flags={} *seq_number={} *ack_number{} }}",
-            self.src_port, self.dst_port, self.flags, self.seq_number, self.ack_number
+            "{{ TcpHeader: *src_port={} *dst_port={} *flags={:?} *seq_number={} *ack_number={} }}",
+            self.src_port, self.dst_port, TcpFlags::parse(self.flags), self.seq_number, self.ack_number
         )
     }
 }
@@ -1022,7 +1420,6 @@ impl IPv4Header {
     pub fn serialize(&self) -> Vec<u8> {
         let mut h_b: Vec<u8> = Vec::new();
 
-        println!("[PREY] :serialize: version: {} | ihl: {}", self.version, self.ihl);
 
         h_b.extend_from_slice(&[(self.version << 4) | (self.ihl / 4)]);
         h_b.extend_from_slice(&[self.tos]);
@@ -1225,7 +1622,7 @@ impl TcpHeader {
         h_b.extend_from_slice(&self.dst_port.to_be_bytes());
         h_b.extend_from_slice(&self.seq_number.to_be_bytes());
         h_b.extend_from_slice(&self.ack_number.to_be_bytes());
-        h_b.extend_from_slice(&[self.data_offset]);
+        h_b.extend_from_slice(&[((self.data_offset / 4) << 4)]);
         h_b.extend_from_slice(&[self.flags]);
         h_b.extend_from_slice(&self.window_size.to_be_bytes());
         h_b.extend_from_slice(&self.checksum.to_be_bytes());
@@ -1339,6 +1736,40 @@ impl L4 {
     }
 }
 
+impl TcpFlags {
+    pub fn parse(flags: u8) -> Vec<Self> {
+        let mut result: Vec<TcpFlags> = Vec::new();
+
+        let mut mask: u8 = 0x01;
+        while mask > 0x00 {
+            if (flags & mask) > 0x00 {
+                result.push(TcpFlags::from(mask));
+            }
+            mask = mask << 1;
+        }
+
+        result
+    }
+
+    pub fn serialize(flags_vec: &[TcpFlags]) -> u8 {
+        let mut flags: u8 = 0;
+        for flag in flags_vec {
+            let f = match flag {
+                TcpFlags::FIN => 0x01,
+                TcpFlags::SYN => 0x02,
+                TcpFlags::RST => 0x04,
+                TcpFlags::PSH => 0x08,
+                TcpFlags::ACK => 0x10,
+                TcpFlags::URG => 0x20,
+                TcpFlags::Unknown(v) => *v
+            };
+            flags = flags | f;
+        }
+
+        flags
+    }
+}
+
 pub fn calculate_checksum(raw: &[u8]) -> u16 {
     let mut sum: u32 = 0;
     
@@ -1356,7 +1787,6 @@ pub fn calculate_checksum(raw: &[u8]) -> u16 {
         sum = (sum & 0xFFFF) + (sum >> 16);
     }
 
-    //println!("Result: {:02X}", !(sum as u16));
     
     !(sum as u16)
 }
@@ -1367,23 +1797,15 @@ pub fn calculate_checksum_v4(ipv4: &mut IPv4Header) -> u16 {
     calculate_checksum(&bytes)
 }
 
-pub fn calculate_l4_checksum_v4(l3: L3, l4: L4, payload: &[u8]) -> u16 {
+pub fn calculate_l4_checksum_v4(l3: L3, l4_payload: &[u8]) -> u16 {
     match l3 {
         L3::IPv4(ipv4, p) => {
             if p == IpProtocol::TCP {
-                if let L4::TCP(_) = l4 {
-                    return calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip, 
-                        p, l4, payload);
-                } else {
-                    return 0;
-                }
+                return calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip, 
+                    p, l4_payload);
             } else if p == IpProtocol::UDP {
-                if let L4::UDP(_) = l4 {
-                    return calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip, 
-                        p, l4, payload);
-                } else {
-                    return 0;
-                }
+                return calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip, 
+                    p, l4_payload);
             } else {
                 return 0;
             }
@@ -1397,12 +1819,7 @@ fn calculate_icmp_checksum(icmp_payload: &[u8]) -> u16 {
 }
 
 fn calculate_tcp_udp_checksum_v4(src_ip: &Ipv4Addr, dst_ip: &Ipv4Addr,
-protocol: IpProtocol, l4: L4, payload: &[u8]) -> u16 {
-    let mut l4_payload:Vec<u8> = Vec::new();
-
-    l4_payload.extend_from_slice(&l4.serialize());
-    l4_payload.extend_from_slice(&payload);
-
+protocol: IpProtocol, l4_payload: &[u8]) -> u16 {
     let mut buffer = Vec::with_capacity(12 + l4_payload.len());
 
     buffer.extend_from_slice(&src_ip.octets()); 
