@@ -746,6 +746,104 @@ impl<'a> Packet<'a> {
         }
 
     }
+
+    pub fn build_tcp_rst(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
+        let mut packet: Vec<u8> = Vec::new();
+
+        let (eth, _) = match self.ethernet_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+        let (l3, _) = match self.l3_header() {
+            Ok(data) => data,
+            Err(e) => {return Err(e); }
+        };
+
+        match l3 {
+            L3::IPv4(ipv4, protocol) => {
+                if protocol == IpProtocol::TCP {
+
+                    let (l4, _) = match self.l4_header() {
+                        Ok(data) => data,
+                        Err(e) => { return Err(e); }
+                    };
+                    let payload = match self.payload() {
+                        Ok(data) => data,
+                        Err(e) => { return Err(e); }
+                    };
+
+                    if let L4::TCP(tcp) = l4 {
+
+                        let r_eth = EthernetHeader {
+                            dst_mac: eth.src_mac,
+                            src_mac: eth.dst_mac,
+                            ether_type: EtherType::IPv4
+                        };
+
+                        packet.extend_from_slice(&r_eth.serialize());
+
+                        let mut r_ipv4 = IPv4Header {
+                            checksum: 0,
+                            version: ipv4.version,
+                            ihl: ipv4.ihl,
+                            tos: ipv4.tos,
+                            total_len: 40,
+                            id: ipv4.id + 2,
+                            flags: ipv4.flags,
+                            ttl: 64,
+                            protocol: IpProtocol::TCP,
+                            src_ip: ipv4.dst_ip,
+                            dst_ip: ipv4.src_ip
+                        };
+
+                        r_ipv4.checksum = calculate_checksum_v4(&mut r_ipv4);
+                        packet.extend_from_slice(&r_ipv4.serialize());
+
+                        let mut r_tcp = TcpHeader {
+                            ack_number: 0,
+                            seq_number: 0,
+                            src_port: tcp.dst_port,
+                            dst_port: tcp.src_port,
+                            data_offset: 20,
+                            flags: TcpFlags::serialize(&[TcpFlags::RST, TcpFlags::ACK]),
+                            window_size: 0,
+                            checksum: 0,
+                            urgent_pointer: 0
+                        };
+
+                        if !TcpFlags::parse(tcp.flags).contains(&TcpFlags::SYN) {
+                            r_tcp.seq_number = tcp.ack_number;
+                            r_tcp.ack_number = tcp.seq_number + payload.len() as u32;
+                        } else {
+                            r_tcp.seq_number = 0;
+                            r_tcp.ack_number = tcp.seq_number + 1;
+                        }
+
+                        let mut l4_payload: Vec<u8> = Vec::new();
+
+                        l4_payload.extend_from_slice(&r_tcp.serialize());
+
+                        r_tcp.checksum = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip,
+                            protocol, &l4_payload);
+
+                        packet.extend_from_slice(&r_tcp.serialize());
+
+                        buf[..packet.len()].copy_from_slice(&packet);
+                        
+                        Ok(packet.len())
+                    } else {
+                        Err("You can't build a TCP RST from a non-TCP packet.")
+                    }
+                } else {
+                    Err("You can't build a TCP RST from a non-TCP packet.")
+                }
+            },
+            L3::IPv6(ipv6, protocol) => {
+                Err("Still not finished.")
+            },
+            _ => Err("You can't build a TCP RST from a non-TCP packet, and TCP only existis for IPv4/6 L3!")
+        }
+    }
 }
 
 

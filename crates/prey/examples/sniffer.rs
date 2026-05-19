@@ -80,7 +80,7 @@ fn main() {
                         }
 
                     }
-                } else if let L3::IPv4(_, protocol) = l3 {
+                } else if let L3::IPv4(ipv4, protocol) = l3 {
                     if protocol == IpProtocol::ICMP {
                         println!("Its a ICMP packet!");
                         let mut response = pool.acquire().unwrap();
@@ -124,6 +124,29 @@ fn main() {
                             L4::TCP(tcp) => {
                                 let flags = TcpFlags::parse(tcp.flags);
                                 if flags == [TcpFlags::SYN] {
+                                    /*if ipv4.src_ip == Ipv4Addr::new(172, 16, 50, 1) {
+                                        let mut response = pool.acquire().unwrap();
+                                        println!("[PREY] :: BLOCKED IP DETECTED!");
+                                        match packet.build_tcp_rst(response.as_mut_slice()) {
+                                            Ok(n) => {
+                                                response.advance(n);
+                                                println!("{} bytes written!", n);
+                                                let space = conn.write_buffer.as_mut_slice();
+                                                space[..response.data().len()].copy_from_slice(&response.data());
+                                                conn.write_buffer.advance(response.data().len());
+
+                                                println!("Sending TCP RST!");
+                                                conn.send().unwrap();
+                                                conn.read_buffer.clear();
+                                                continue;
+                                            },
+                                            Err(e) => {
+                                                println!("Error while building ACK: {}", e);
+                                                conn.read_buffer.clear();
+                                                continue;
+                                            }
+                                        }
+                                    } Uncomment if you want to test some IP blocking.*/
                                     let mut response = pool.acquire().unwrap();
                                     match packet.build_tcp_syn_ack(response.as_mut_slice()) {
                                         Ok(n) => {
@@ -147,10 +170,46 @@ fn main() {
                                     conn.read_buffer.clear();
                                 } else if flags == [TcpFlags::PSH, TcpFlags::ACK] {
                                     println!("Packet have been acquired.");
+                                    let mut response_payload = format!("You have sent: {} to PREY!\n", request.replace("\n", ""));
                                     println!("{}", request);
+                                    if request.contains("HTTP") {
+                                        let body = "You have sent a HTTP request to PREY!";
+                                        response_payload = format!(
+                                            "HTTP/1.1 200 OK\r\n\
+                                            Content-Type: text\r\n\
+                                            Content-Length: {}\r\n\
+                                            \r\n\
+                                            {}",
+                                            body.len(), body
+                                        );
+                                    }
+
                                     let mut response = pool.acquire().unwrap();
-                                    let response_payload = format!("You have sent: {} to PREY!\n", request.replace("\n", ""));
+                                    
                                     {
+                                        if request.contains("virus") {
+                                            println!("[PREY] :: VIRUS DETECTED!");
+                                            match packet.build_tcp_rst(response.as_mut_slice()) {
+                                                Ok(n) => {
+                                                    response.advance(n);
+                                                    println!("{} bytes written!", n);
+                                                    let space = conn.write_buffer.as_mut_slice();
+                                                    space[..response.data().len()].copy_from_slice(&response.data());
+                                                    conn.write_buffer.advance(response.data().len());
+
+                                                    println!("Sending TCP RST!");
+                                                    conn.send().unwrap();
+                                                    conn.read_buffer.clear();
+                                                    continue;
+                                                },
+                                                Err(e) => {
+                                                    println!("Error while building ACK: {}", e);
+                                                    conn.read_buffer.clear();
+                                                    continue;
+                                                }
+                                            }
+                                        }
+
                                         match packet.build_tcp_response(response.as_mut_slice(), response_payload.as_bytes()) {
                                             Ok(n) => {
                                                 response.advance(n);
