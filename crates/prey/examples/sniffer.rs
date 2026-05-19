@@ -84,7 +84,6 @@ fn main() {
                     if protocol == IpProtocol::ICMP {
                         println!("Its a ICMP packet!");
                         let mut response = pool.acquire().unwrap();
-
                         match packet.build_icmp_reply(response.as_mut_slice()) {
                             Ok(n) => {
                                 println!("{} bytes written!", n);
@@ -288,27 +287,32 @@ fn main() {
 
                         match l4 {
                             L4::UDP(udp) => {
+                                let mut response = pool.acquire().unwrap();
+                                if udp.dst_port != 8080 as u16 {
+                                    println!("[PREY] :: UDP at blocked PORT");
+                                    match packet.build_icmp_reject(response.as_mut_slice()) {
+                                        Ok(n) => {
+                                            println!("{} bytes written!", n);
+                                            response.advance(n);
+                                            let writable = conn.write_buffer.as_mut_slice();
+                                            writable[..response.data().len()].copy_from_slice(&response.data());
+                                            conn.write_buffer.advance(response.data().len());
+                                            println!("Sending UDP reply!");
+                                            conn.send().unwrap();
+                                        },
+                                        Err(e) => {
+                                            println!("An error have ocurred: {}", e);
+                                            conn.read_buffer.clear();
+                                            continue;
+                                        }
+                                    };
+                                }
                                 let response_data = b"This is your UDP response!";
 
-                                let mut response = pool.acquire().unwrap();
+                                
 
 
-                                match packet.build_udp_response(response.as_mut_slice(), response_data) {
-                                    Ok(n) => {
-                                        println!("{} bytes written!", n);
-                                        response.advance(n);
-                                        let writable = conn.write_buffer.as_mut_slice();
-                                        writable[..response.data().len()].copy_from_slice(&response.data());
-                                        conn.write_buffer.advance(response.data().len());
-                                        println!("Sending UDP reply!");
-                                        conn.send().unwrap();
-                                    },
-                                    Err(e) => {
-                                        println!("An error have ocurred: {}", e);
-                                        conn.read_buffer.clear();
-                                        continue;
-                                    }
-                                };
+                                
                             },
                             _ => {
                                 println!("This is not a UDP packet.");

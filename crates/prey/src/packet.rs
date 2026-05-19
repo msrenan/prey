@@ -378,6 +378,137 @@ impl<'a> Packet<'a> {
         Ok(packet.len())
     }
 
+    pub fn build_icmp_reject(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
+        let mut packet: Vec<u8> = Vec::new();
+
+        let (eth, _) = match self.ethernet_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
+        let (l3, _) = match self.l3_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
+        let (l4, _) = match self.l4_header() {
+            Ok(data) => data,
+            Err(e) =>  {return Err(e); }
+        };
+
+        //This function need to be upgraded -> A param type_of_reject need to be passed to decide
+        // what code will be used while building the icmp reply. For now, its going to be a default
+        // UDP denying function.
+
+        match l3 {
+            L3::IPv4(ipv4, _) => {
+
+                if let L4::UDP(udp) = l4 {
+                    let r_eth = EthernetHeader {
+                        src_mac: eth.dst_mac,
+                        dst_mac: eth.src_mac,
+                        ether_type: eth.ether_type
+                    };
+
+                    packet.extend_from_slice(&r_eth.serialize());
+
+                    let mut r_ipv4 = IPv4Header {
+                        checksum: 0,
+                        dst_ip: ipv4.src_ip,
+                        src_ip: ipv4.dst_ip,
+                        version: 4,
+                        ihl: 20,
+                        tos: ipv4.tos,
+                        total_len: 56,
+                        flags: ipv4.flags,
+                        id: ipv4.id + 2,
+                        ttl: 64,
+                        protocol: IpProtocol::ICMP
+                    };
+                    r_ipv4.checksum = calculate_checksum_v4(&mut r_ipv4);
+                    packet.extend_from_slice(&r_ipv4.serialize());
+
+                    let mut r_icmp = IcmpHeader {
+                        checksum: 0,
+                        code: 3,
+                        icmp_type: IcmpType::Unreachable,
+                        id: 0,
+                        seq_number: 0
+                    };
+
+                    let mut payload: Vec<u8> = Vec::new();
+
+                    payload.extend_from_slice(&ipv4.serialize());
+                    payload.extend_from_slice(&udp.serialize());
+
+                    let mut icmp_payload: Vec<u8> = Vec::new();
+                    icmp_payload.extend_from_slice(&r_icmp.serialize());
+                    icmp_payload.extend_from_slice(&payload);
+                    r_icmp.checksum = calculate_icmp_checksum(&icmp_payload);
+
+                    packet.extend_from_slice(&r_icmp.serialize());
+                    packet.extend_from_slice(&payload);
+                }
+
+                if let L4::ICMP(icmp) = l4 {
+                    let r_eth = EthernetHeader {
+                        src_mac: eth.dst_mac,
+                        dst_mac: eth.src_mac,
+                        ether_type: eth.ether_type
+                    };
+
+                    packet.extend_from_slice(&r_eth.serialize());
+
+                    let mut r_ipv4 = IPv4Header {
+                        checksum: 0,
+                        dst_ip: ipv4.src_ip,
+                        src_ip: ipv4.dst_ip,
+                        version: 4,
+                        ihl: 20,
+                        tos: ipv4.tos,
+                        total_len: 56,
+                        flags: ipv4.flags,
+                        id: ipv4.id + 2,
+                        ttl: 64,
+                        protocol: IpProtocol::ICMP
+                    };
+                    r_ipv4.checksum = calculate_checksum_v4(&mut r_ipv4);
+                    packet.extend_from_slice(&r_ipv4.serialize());
+
+                    let mut r_icmp = IcmpHeader {
+                        checksum: 0,
+                        code: 1,
+                        icmp_type: IcmpType::Unreachable,
+                        id: 0,
+                        seq_number: 0
+                    };
+
+                    let mut payload: Vec<u8> = Vec::new();
+
+                    payload.extend_from_slice(&ipv4.serialize());
+                    payload.extend_from_slice(&icmp.serialize());
+
+                    let mut icmp_payload: Vec<u8> = Vec::new();
+                    icmp_payload.extend_from_slice(&r_icmp.serialize());
+                    icmp_payload.extend_from_slice(&payload);
+                    r_icmp.checksum = calculate_icmp_checksum(&icmp_payload);
+
+                    packet.extend_from_slice(&r_icmp.serialize());
+                    packet.extend_from_slice(&payload);
+                }
+
+                buf[..packet.len()].copy_from_slice(&packet);
+                Ok(packet.len())
+            },
+            L3::IPv6(ipv6, _) => {
+                Err("Not finished.")
+            },
+            _ => Err("This packet is not part of a Connection that can be denied.")
+        }
+
+        
+    }
+
     pub fn build_tcp_syn_ack(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
         let mut packet: Vec<u8> = Vec::new();
 
@@ -1124,6 +1255,7 @@ pub struct TcpHeader{
 pub enum IcmpType {
     Request,
     Reply,
+    Unreachable,
     Unknown(u8)
 }
 
@@ -1236,6 +1368,7 @@ impl From<u8> for IcmpType {
         match value {
             8 => IcmpType::Request,
             0 => IcmpType::Reply,
+            3 => IcmpType::Unreachable,
             _ => IcmpType::Unknown(value)
         }
     }
@@ -1295,6 +1428,7 @@ impl fmt::Display for IcmpType {
         match self {
             IcmpType::Reply => write!(f, "Reply"),
             IcmpType::Request => write!(f, "Request"),
+            IcmpType::Unreachable => write!(f, "Destination Unreachable"),
             IcmpType::Unknown(b) => write!(f, "Unknown operation ({:02X})", b)
         }
     }
@@ -1876,6 +2010,7 @@ impl IcmpType {
         match tp {
             IcmpType::Reply => 0 as u8,
             IcmpType::Request => 8 as u8,
+            IcmpType::Unreachable => 3 as u8,
             IcmpType::Unknown(x) => x
         }
     }
