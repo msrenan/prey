@@ -1,11 +1,13 @@
 
 use std::{io, net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4}};
-use prey::{buffer::BufferPool, network::{Connection, RawSocket}, packet::{ArpOperation, IpProtocol, L3, L4, Packet, TcpFlags}};
+use prey::{buffer::BufferPool, network::{Connection, RawSocket}, packet::{ArpOperation, IcmpV6Type, IpProtocol, L3, L4, Packet, TcpFlags}};
 
 const MY_IP: Ipv4Addr = Ipv4Addr::new(172, 16, 50, 2);
 const MY_IP_6: Ipv6Addr = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0002);
 const MY_MAC: [u8; 6] = [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff];
 const BROAD_MAC: [u8; 6] = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
+const BROAD_PREFIX:u16 = 0xff02;
+
 fn main() {
     println!("Starting sniffer setup!");
 
@@ -330,14 +332,55 @@ fn main() {
                         }
                     }
                 } else if let L3::IPv6(ipv6, protocol) = l3{
-                    if ipv6.dst_ip != MY_IP_6 {
+                    if ipv6.dst_ip != MY_IP_6 && ipv6.dst_ip.segments()[0] != BROAD_PREFIX  {
                         println!("It's not for me...");
                         conn.read_buffer.clear();
                         continue;
                     }
 
-                    if protocol == IpProtocol::ICMP {
-                        
+                    let (l4, _) = match packet.l4_header() {
+                        Ok(data) => data,
+                        Err(e) => {
+                            println!("Error: {}", e);
+                            conn.read_buffer.clear();
+                            continue;
+                        }
+                    };
+
+                    if let L4::ICMPv6(icmpv6) = l4 {
+                        if icmpv6.msg_type == IcmpV6Type::NS {
+                            let mut response = pool.acquire().unwrap();
+                            match packet.build_ndp_na(response.as_mut_slice(), MY_IP_6, MY_MAC) {
+                                Ok(n) => {
+                                    response.advance(n);
+                                    let space = conn.write_buffer.as_mut_slice();
+                                    space[..response.data().len()].copy_from_slice(&response.data());
+                                    conn.write_buffer.advance(response.data().len());
+                                    conn.send().unwrap();
+                                },
+                                Err(e) => {
+                                    println!("Error while sending NDP-NA reply: {}", e);
+                                    conn.read_buffer.clear();
+                                    continue;
+                                }
+                            }
+                        } else  if icmpv6.msg_type == IcmpV6Type::Request {
+                            let mut response = pool.acquire().unwrap();
+                            match packet.build_icmp_reply(response.as_mut_slice()) {
+                                Ok(n) => {
+                                    response.advance(n);
+                                    let space = conn.write_buffer.as_mut_slice();
+                                    space[..response.data().len()].copy_from_slice(&response.data());
+                                    conn.write_buffer.advance(response.data().len());
+                                    conn.send().unwrap();
+                                },
+                                Err(e) => {
+                                    println!("Error while sending NDP-NA reply: {}", e);
+                                    conn.read_buffer.clear();
+                                    continue;
+                                }
+                            }
+                        }
                     }
                 }
 

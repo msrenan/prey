@@ -34,8 +34,6 @@ impl<'a> Packet<'a> {
         Self { raw }
     }
 
-    //ICMP REPLY
-
     /// # fn len
     /// Function that gets the total length of the packet.
     ///
@@ -153,7 +151,8 @@ impl<'a> Packet<'a> {
                         } 
                         Ok((L4::UDP(udp), 8))
                     },
-                    IpProtocol::Unknown(n) => Ok((L4::Unknown(n), 0))
+                    IpProtocol::Unknown(n) => Ok((L4::Unknown(n), 0)),
+                    _ => { return Err("ICMPv6 is only for IPv6!"); }
                 }
             },
             L3::IPv6(ipv6, protocol) => {
@@ -161,28 +160,30 @@ impl<'a> Packet<'a> {
                 let dst_ip = ipv6.dst_ip;
                 let next_header = ipv6.next_header;
                 match protocol {
-                    IpProtocol::ICMP => {
-                        let icmp = IcmpHeader::parse(raw).unwrap();
-                        if calculate_l4_checksum_v6(&src_ip, &dst_ip, next_header, L4::ICMP(icmp), &raw) != 0x0000 {
+                    IpProtocol::ICMPv6 => {
+                        let icmp = IcmpV6Header::parse(raw).unwrap();
+                        if calculate_l4_checksum_v6(&src_ip, &dst_ip, next_header, &raw) != 0x0000 {
                             return Err("Invalid Packet: ICMPv6 Checksum Error.");
                         }
-                        Ok((L4::ICMP(icmp), 8))
+                        Ok((L4::ICMPv6(icmp), 4))
                     },
                     IpProtocol::TCP => {
                         let tcp = TcpHeader::parse(raw).unwrap();
-                        if calculate_l4_checksum_v6(&src_ip, &dst_ip, next_header, L4::TCP(tcp), &raw[(tcp.data_offset as usize)..]) != 0x0000 {
+                        if calculate_l4_checksum_v6(&src_ip, &dst_ip, next_header, &raw) != 0x0000 {
                             return Err("Invalid Packet: TCPv6 Checksum Error.");
                         } 
                         Ok((L4::TCP(tcp), tcp.data_offset as usize))
                     },
                     IpProtocol::UDP => {
                         let udp = UdpHeader::parse(raw).unwrap();
-                        if calculate_l4_checksum_v6(&src_ip, &dst_ip, next_header, L4::UDP(udp), &raw[8..]) != 0x0000 {
+                        let checksum_value = calculate_l4_checksum_v6(&src_ip, &dst_ip, next_header,&raw);
+                        if  checksum_value != 0x0000 && checksum_value != 0xFFFF {
                             return Err("Invalid Packet: UDPv6 Checksum Error.");
                         } 
                         Ok((L4::UDP(udp), 8))
                     },
-                    IpProtocol::Unknown(n) => Ok((L4::Unknown(n), 0))
+                    IpProtocol::Unknown(n) => Ok((L4::Unknown(n), 0)),
+                    _ => Err("ICMP is not a IPv6 Protocol")
                 }
             },
             L3::ARP(_) => Err("Arp packet has no L4 Header."),
@@ -295,17 +296,20 @@ impl<'a> Packet<'a> {
     }
 
     pub fn build_icmp_reply(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
-        let packet: Vec<u8> = Vec::new();
+        let mut packet: Vec<u8> = Vec::new();
 
         let (eth, _) = self.ethernet_header().unwrap();
         let (l3, _) = self.l3_header().unwrap();
+
+        let payload = match self.payload() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
         match l3 {
             L3::IPv4(ipv4, protocol) => {
                 if protocol == IpProtocol::ICMP {
-                    let payload = match self.payload() {
-                        Ok(data) => data,
-                        Err(e) => { return Err(e); }
-                    };
+                    
 
                     let (l4, _) = match self.l4_header() {
                         Ok(data) => data,
@@ -313,8 +317,6 @@ impl<'a> Packet<'a> {
                     };
 
                     if let L4::ICMP(header) = l4 {
-
-                        let mut packet: Vec<u8> = Vec::new();
 
                         let r_eth = EthernetHeader {
                             src_mac: eth.dst_mac,
@@ -366,14 +368,54 @@ impl<'a> Packet<'a> {
                 return Err("An error ocurred while building ICMP reply.");
             }
             L3::IPv6(ipv6, protocol) => {
-                if protocol == IpProtocol::ICMP {
+                if protocol == IpProtocol::ICMPv6 {
                     let l4 = self.l4_header().unwrap().0;
-                    if let L4::ICMP(header) = l4 {
-                        println!("[PREY] :: ICMPv6 reply not finished.");
+                    
+                    if let L4::ICMPv6(header) = l4 {
+                        let r_eth = EthernetHeader {
+                            src_mac: eth.dst_mac,
+                            dst_mac: eth.src_mac,
+                            ether_type: EtherType::IPv6
+                        };
+
+                        packet.extend_from_slice(&r_eth.serialize());
+
+                        let r_ipv6 = IPv6Header {
+                            class: ipv6.class,
+                            version: 6,
+                            flow: ipv6.flow,
+                            dst_ip: ipv6.src_ip,
+                            src_ip: ipv6.dst_ip,
+                            payload_length: 4 + payload.len() as u16,
+                            next_header: IpProtocol::ICMPv6,
+                            hop_limit: 64
+                        };
+
+                        packet.extend_from_slice(&r_ipv6.serialize());
+
+                        let mut r_icmpv6 = IcmpV6Header {
+                            checksum: 0,
+                            code: 0,
+                            msg_type: IcmpV6Type::Reply
+                        };
+
+                        let mut ndp_body: Vec<u8> = Vec::with_capacity(32);
+                        ndp_body.extend_from_slice(&r_icmpv6.serialize());
+                        ndp_body.extend_from_slice(&payload);
+                        
+
+                        r_icmpv6.checksum = calculate_l4_checksum_v6(&ipv6.dst_ip, &ipv6.src_ip, IpProtocol::ICMPv6, &ndp_body);
+
+                        packet.extend_from_slice(&r_icmpv6.serialize());
+                        packet.extend_from_slice(&ndp_body[4..]);
+
+                        buf[..packet.len()].copy_from_slice(&packet);
+                    } else {
+                        return Err("You can't build a ICMP reply from a non ICMP packet");
                     }
                 }
             },
-            _ => { return Err("You can't build a ICMP reply from a non-ICMP packet."); }
+            _ => { return Err("You can't build a ICMP reply from a non-ICMP packet, and ICMP only exists at IPv4"); }
         }
 
         Ok(packet.len())
@@ -1051,6 +1093,79 @@ impl<'a> Packet<'a> {
             _ => Err("You can't build a UDP reply from a non-UDP packet, and UDP only exists for IPv4/6 Ethernet Types.")
         }
     }
+
+    pub fn build_ndp_na(&self, buf: &mut [u8], ip: Ipv6Addr, mac: [u8; 6]) -> Result<usize, &'static str> {
+        let mut packet: Vec<u8> = Vec::with_capacity(72);
+
+        let (eth, _) = match self.ethernet_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
+        let (l3, _) = match self.l3_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
+        let (l4, _) = match self.l4_header() {
+            Ok(data) => data,
+            Err(e) => {return Err(e); }
+        };
+
+        if let L3::IPv6(ipv6, _) = l3 {
+            if let L4::ICMPv6(_) = l4 {
+                let r_eth = EthernetHeader {
+                    dst_mac: eth.src_mac,
+                    src_mac: mac,
+                    ether_type: EtherType::IPv6
+                };
+
+                packet.extend_from_slice(&r_eth.serialize());
+
+                let r_ipv6 = IPv6Header {
+                    class: ipv6.class,
+                    version: 6,
+                    flow: ipv6.flow,
+                    payload_length: 0x0020,
+                    next_header: IpProtocol::ICMPv6,
+                    hop_limit: 255,
+                    src_ip: ip,
+                    dst_ip: ipv6.src_ip
+                };
+
+                packet.extend_from_slice(&r_ipv6.serialize());
+
+                let mut r_icmpv6 = IcmpV6Header {
+                    checksum: 0,
+                    code: 0,
+                    msg_type: IcmpV6Type::NA
+                };
+
+                let mut ndp_body: Vec<u8> = Vec::with_capacity(32);
+                ndp_body.extend_from_slice(&r_icmpv6.serialize());
+                ndp_body.extend_from_slice(&[0x60, 0x00, 0x00, 0x00]);
+                ndp_body.extend_from_slice(&ip.octets());
+                ndp_body.extend_from_slice(&[0x02]);
+                ndp_body.extend_from_slice(&[0x01]);
+                ndp_body.extend_from_slice(&mac);
+
+                r_icmpv6.checksum = calculate_l4_checksum_v6(&ip, &ipv6.src_ip, IpProtocol::ICMPv6, &ndp_body);
+
+                packet.extend_from_slice(&r_icmpv6.serialize());
+                packet.extend_from_slice(&ndp_body[4..]);
+
+                buf[..packet.len()].copy_from_slice(&packet);
+
+            } else {
+                return Err("NDP only exists in a ICMPv6 packet.");
+            }
+        } else {
+            return Err("You can't reply a ICMPv6 packet from a non-IPv6 one.");
+        }
+ 
+        Ok(packet.len())
+    }
+    
 }
 
 // <!---------------------------------------------------------------------------------------------------------->
@@ -1209,6 +1324,13 @@ pub struct IcmpHeader {
     pub seq_number: u16
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IcmpV6Header {
+    pub msg_type: IcmpV6Type,
+    pub code: u8,
+    pub checksum: u16,
+}
+
 // <!----------------------------------------------------------------------------------------------------------->
 
 // <!---------------------------------------------- Enums ------------------------------------------------------>
@@ -1242,6 +1364,7 @@ pub enum IpProtocol {
     TCP,
     UDP,
     ICMP,
+    ICMPv6,
     Unknown(u8)
 }
 
@@ -1275,6 +1398,7 @@ pub enum L4 {
     TCP(TcpHeader),
     UDP(UdpHeader),
     ICMP(IcmpHeader),
+    ICMPv6(IcmpV6Header),
     Raw,
     Unknown(u8)
 }
@@ -1319,6 +1443,21 @@ pub enum TcpFlags {
     Unknown(u8)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IcmpV6Type {
+    Unreachable,
+    TooBig,
+    TimeExceeded,
+    ParamProblem,
+    Request,
+    Reply,
+    RS,
+    RA,
+    NS,
+    NA,
+    Unknown(u8)
+}
+
 // <!----------------------------------------------------------------------------------------------------------->
 
 // <!-------------------------------------- Trait implementations ---------------------------------------------->
@@ -1345,7 +1484,7 @@ impl From<u8> for IpProtocol {
             1 => IpProtocol::ICMP,
             6 => IpProtocol::TCP,
             17 => IpProtocol::UDP,
-            58 => IpProtocol::ICMP,
+            58 => IpProtocol::ICMPv6,
             _ => IpProtocol::Unknown(value)
         }
     }
@@ -1387,6 +1526,24 @@ impl From<u8> for IcmpType {
     }
 }
 
+impl From<u8> for IcmpV6Type {
+    fn from(value: u8) -> Self {
+        match value {
+            0x01 => IcmpV6Type::Unreachable,
+            0x02 => IcmpV6Type::TooBig,
+            0x03 => IcmpV6Type::TimeExceeded,
+            0x04 => IcmpV6Type::ParamProblem,
+            0x80 => IcmpV6Type::Request,
+            0x81 => IcmpV6Type::Reply,
+            0x85 => IcmpV6Type::RS,
+            0x86 => IcmpV6Type::RA,
+            0x87 => IcmpV6Type::NS,
+            0x88 => IcmpV6Type::NA,
+            _ => IcmpV6Type::Unknown(value)
+        }
+    }
+}
+
 impl fmt::Display for TcpFlags {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1418,6 +1575,7 @@ impl fmt::Display for IpProtocol {
             IpProtocol::TCP => write!(f, "TCP"),
             IpProtocol::UDP => write!(f, "UDP"),
             IpProtocol::ICMP => write!(f, "ICMP"),
+            IpProtocol::ICMPv6 => write!(f, "ICMPv6"),
             IpProtocol::Unknown(b) => write!(f, "Unknown IP Protocol, bytes: {:02X}", b)
         }
     }
@@ -1443,6 +1601,24 @@ impl fmt::Display for IcmpType {
             IcmpType::Request => write!(f, "Request"),
             IcmpType::Unreachable => write!(f, "Destination Unreachable"),
             IcmpType::Unknown(b) => write!(f, "Unknown operation ({:02X})", b)
+        }
+    }
+}
+
+impl fmt::Display for IcmpV6Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IcmpV6Type::Unreachable => write!(f, "Destination Unreachable"),
+            IcmpV6Type::TooBig => write!(f, "Packet is Too Big"),
+            IcmpV6Type::TimeExceeded => write!(f, "Time Exceeded"),
+            IcmpV6Type::ParamProblem => write!(f, "Parameter Problem"),
+            IcmpV6Type::Request => write!(f, "Echo Request"),
+            IcmpV6Type::Reply => write!(f, "Echo Reply"),
+            IcmpV6Type::RS => write!(f, "Router Solicitation"),
+            IcmpV6Type::RA => write!(f, "Router Advertisement"),
+            IcmpV6Type::NS => write!(f, "Neighbor Solicitation"),
+            IcmpV6Type::NA => write!(f, "Neighbor Advertisement"),
+            IcmpV6Type::Unknown(value) => write!(f, "Unknown type: {}", value)
         }
     }
 }
@@ -1528,6 +1704,15 @@ impl fmt::Display for IcmpHeader {
     }
 }
 
+impl fmt::Display for IcmpV6Header {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f,
+            "{{ IcmpV6Header: *msg_type={} *code={} }}",
+            self.msg_type, self.code
+        )
+    }
+}
+
 impl fmt::Display for L3 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -1543,6 +1728,7 @@ impl fmt::Display for L4 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             L4::ICMP(p) => write!(f, "[L4] {}", p),
+            L4::ICMPv6(p) => write!(f, "[L4] {}", p),
             L4::TCP(p) => write!(f, "[L4] {}", p),
             L4::UDP(p) => write!(f, "[L4] {}", p),
             L4::Raw => write!(f, "[L4] Raw Bytes."),
@@ -1569,7 +1755,7 @@ impl<'a> fmt::Display for Packet<'a> {
 
         let snippet;
 
-        if payload.len() < 20 {
+        if payload.len() < 1000 {
             snippet = String::from_utf8_lossy(payload);
         } else {
             snippet = String::from_utf8_lossy(&payload[..20]);
@@ -1755,7 +1941,7 @@ impl IPv4Header {
         h_b.extend_from_slice(&self.id.to_be_bytes());
         h_b.extend_from_slice(&self.flags.to_be_bytes());
         h_b.extend_from_slice(&[self.ttl]);
-        h_b.extend_from_slice(&[IpProtocol::serialize(self.protocol, 4)]);
+        h_b.extend_from_slice(&[IpProtocol::serialize(self.protocol)]);
         h_b.extend_from_slice(&self.checksum.to_be_bytes());
         h_b.extend_from_slice(&self.src_ip.octets());
         h_b.extend_from_slice(&self.dst_ip.octets());
@@ -1812,7 +1998,7 @@ impl IPv6Header {
         let vcf: u32 = ((self.version as u32 & 0x0F) << 28) | ((self.class as u32 & 0xFF) << 20) | (self.flow & 0x000F_FFFF);
         h_b.extend_from_slice(&vcf.to_be_bytes());
         h_b.extend_from_slice(&self.payload_length.to_be_bytes());
-        h_b.extend_from_slice(&[IpProtocol::serialize(self.next_header, 6)]);
+        h_b.extend_from_slice(&[IpProtocol::serialize(self.next_header)]);
         h_b.extend_from_slice(&[self.hop_limit]);
         h_b.extend_from_slice(&self.src_ip.octets());
         h_b.extend_from_slice(&self.dst_ip.octets());
@@ -1960,6 +2146,33 @@ impl TcpHeader {
     }
 }
 
+impl IcmpV6Header {
+    pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
+        if raw.len() < 4 {
+            return Err("Packet is too small to have a ICMPv6 header!");
+        }
+
+        let msg_type = IcmpV6Type::from(raw[0]);
+        let code = raw[1];
+        let checksum = u16::from_be_bytes([raw[2], raw[3]]);
+
+        Ok( Self {
+            msg_type,
+            code,
+            checksum
+        })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut h_b: Vec<u8> = Vec::new();
+        h_b.extend_from_slice(&[self.msg_type.serialize()]);
+        h_b.extend_from_slice(&[self.code]);
+        h_b.extend_from_slice(&self.checksum.to_be_bytes());
+
+        h_b
+    }
+}
+
 //                 3. Enums =============================================================================================
 
 impl EtherType {
@@ -1990,15 +2203,10 @@ impl IpProtocol {
     /// 
     /// # Returns
     /// A `u8` that represents a type of IpProtocol enum  as bytes.
-    pub fn serialize(protocol: IpProtocol, version: u8) -> u8 {
+    pub fn serialize(protocol: IpProtocol) -> u8 {
         match protocol {
-            IpProtocol::ICMP => {
-                if version == 4 {
-                    1 as u8
-                } else {
-                    58 as u8
-                }
-            }
+            IpProtocol::ICMP => 1 as u8,
+            IpProtocol::ICMPv6 => 58 as u8,
             IpProtocol::TCP => 6 as u8,
             IpProtocol::UDP => 17 as u8,
             IpProtocol::Unknown(value) => value
@@ -2059,6 +2267,7 @@ impl L4 {
             L4::ICMP(icmp) => icmp.serialize(),
             L4::TCP(tcp) => tcp.serialize(),
             L4::UDP(udp) => udp.serialize(),
+            L4::ICMPv6(icmpv6) => icmpv6.serialize(),
             _ => {
                 let ret: Vec<u8> = Vec::with_capacity(0);
                 return ret;
@@ -2101,6 +2310,23 @@ impl TcpFlags {
     }
 }
 
+impl IcmpV6Type {
+    pub fn serialize(&self) -> u8 {
+        match self {
+            IcmpV6Type::Unreachable => 0x01,
+            IcmpV6Type::TooBig => 0x02,
+            IcmpV6Type::TimeExceeded => 0x03,
+            IcmpV6Type::ParamProblem => 0x04,
+            IcmpV6Type::Request => 0x80,
+            IcmpV6Type::Reply => 0x81,
+            IcmpV6Type::RS => 0x85,
+            IcmpV6Type::RA => 0x86,
+            IcmpV6Type::NS => 0x87,
+            IcmpV6Type::NA => 0x88,
+            IcmpV6Type::Unknown(value) => *value
+        }
+    }
+}
 
 // <!-------------------------------------------------------------------------------------------------------------->
 
@@ -2166,7 +2392,7 @@ protocol: IpProtocol, l4_payload: &[u8]) -> u16 {
     buffer.extend_from_slice(&src_ip.octets()); 
     buffer.extend_from_slice(&dst_ip.octets()); 
     buffer.push(0);                             
-    buffer.push(IpProtocol::serialize(protocol, 4));                      
+    buffer.push(IpProtocol::serialize(protocol));                      
     buffer.extend_from_slice(&(l4_payload.len() as u16).to_be_bytes());
 
     buffer.extend_from_slice(&l4_payload);
@@ -2180,19 +2406,14 @@ protocol: IpProtocol, l4_payload: &[u8]) -> u16 {
     checksum
 }
 
-pub fn calculate_l4_checksum_v6(src_ip: &Ipv6Addr, dst_ip: &Ipv6Addr, next_header: IpProtocol, l4: L4, payload: &[u8]) -> u16 {
-    let mut l4_payload:Vec<u8> = Vec::new();
-
-    l4_payload.extend_from_slice(&l4.serialize());
-    l4_payload.extend_from_slice(&payload);
+pub fn calculate_l4_checksum_v6(src_ip: &Ipv6Addr, dst_ip: &Ipv6Addr, next_header: IpProtocol, l4_payload: &[u8]) -> u16 {
+    let mut buffer: Vec<u8> = Vec::new();
     
-    let mut buffer = Vec::with_capacity(40 + l4_payload.len());
-
     buffer.extend_from_slice(&src_ip.octets()); 
     buffer.extend_from_slice(&dst_ip.octets()); 
     buffer.extend_from_slice(&(l4_payload.len() as u32).to_be_bytes()); 
     buffer.extend_from_slice(&[0, 0, 0]);       
-    buffer.push(IpProtocol::serialize(next_header, 6));                   
+    buffer.push(IpProtocol::serialize(next_header));                   
 
     buffer.extend_from_slice(&l4_payload);
 
