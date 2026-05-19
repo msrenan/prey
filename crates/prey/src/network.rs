@@ -134,8 +134,8 @@ impl RawSocket {
     ///
     /// # Returns
     /// A `Result` containing the RawSocket object.
-    pub fn new(interface: &str, sub_network: String) -> io::Result<Self> {
-        setup_tap_interface(sub_network).unwrap();
+    pub fn new(interface: &str, sub_networkv4: String, sub_networkv6: String) -> io::Result<Self> {
+        setup_tap_interface(sub_networkv4, sub_networkv6).unwrap();
 
         let tap_file = OpenOptions::new()
             .read(true)
@@ -255,11 +255,11 @@ struct Ifreq {
 /// commands manually.
 /// 
 /// # Params
-/// - sub_network: `String` - The subnetwork tap0 should work on (ex: 172.16.50.1/24)
+/// - sub_networkv4: `String` - The subnetwork tap0 should work on (ex: 172.16.50.1/24)
 /// 
 /// # Returns
 /// A `Result<(), Box<dyn Error>>` that represents the success or not of the **tap0** creation.
-fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
+fn setup_tap_interface(sub_networkv4: String, sub_networkv6: String) -> Result<(), Box<dyn Error>> {
     let interface = "tap0";
 
     let exists = Command::new("ip")
@@ -277,16 +277,30 @@ fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
     }
 
     let ip_output = Command::new("sudo")
-        .args(["ip", "addr", "add", &sub_network, "dev", interface])
+        .args(["ip", "addr", "add", &sub_networkv4, "dev", interface])
         .stderr(Stdio::piped()) 
         .output()?;
 
     if !ip_output.status.success() {
         let err_msg = String::from_utf8_lossy(&ip_output.stderr);
         if err_msg.contains("File exists") {
-            println!("[PREY] :: {} is already addressed.", interface);
+            println!("[PREY] :: IPv4 of {} is already addressed.", interface);
         } else {
-            eprintln!("[PREY] :: error setting IP: {}", err_msg.trim());
+            eprintln!("[PREY] :: error setting IPv4: {}", err_msg.trim());
+        }
+    }
+
+    let output = Command::new("sudo")
+        .args(["ip", "-6", "addr", "add", &sub_networkv6, "dev", interface])
+        .stderr(Stdio::piped())
+        .output()?;
+
+    if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        if err_msg.contains("File exists") {
+            println!("[PREY] :: IPv6 of {} is already addressed.", interface);
+        } else {
+            eprintln!("[PREY] :: error setting IPv6: {}", err_msg.trim());
         }
     }
 
@@ -294,7 +308,7 @@ fn setup_tap_interface(sub_network: String) -> Result<(), Box<dyn Error>> {
         .args(["ip", "link", "set", interface, "up"])
         .status()?;
 
-    let base_ip = sub_network.split_once("/").map(|(ip, _)| ip).unwrap_or(&sub_network);
+    let base_ip = sub_networkv4.split_once("/").map(|(ip, _)| ip).unwrap_or(&sub_networkv4);
     let mut parts: Vec<&str> = base_ip.split('.').collect();
     if parts.len() == 4 {
         parts[3] = "1"; 

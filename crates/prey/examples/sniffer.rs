@@ -1,8 +1,9 @@
 
-use std::{io, net::{Ipv4Addr, SocketAddr, SocketAddrV4}};
+use std::{io, net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4}};
 use prey::{buffer::BufferPool, network::{Connection, RawSocket}, packet::{ArpOperation, IpProtocol, L3, L4, Packet, TcpFlags}};
 
 const MY_IP: Ipv4Addr = Ipv4Addr::new(172, 16, 50, 2);
+const MY_IP_6: Ipv6Addr = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0002);
 const MY_MAC: [u8; 6] = [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff];
 const BROAD_MAC: [u8; 6] = [0xff, 0xff, 0xff, 0xff, 0xff, 0xff];
 fn main() {
@@ -12,7 +13,7 @@ fn main() {
 
     let dummy_adr = SocketAddr::V4(SocketAddrV4::new(MY_IP, 8080));
 
-    let socket = RawSocket::new("tap0", "172.16.50.1/24".to_string()).unwrap();
+    let socket = RawSocket::new("tap0", "172.16.50.1/24".to_string(), "2001:db8::1/64".to_string()).unwrap();
 
     let tx = pool.acquire().unwrap();
     let rx = pool.acquire().unwrap();

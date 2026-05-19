@@ -1554,9 +1554,17 @@ impl<'a> fmt::Display for Packet<'a> {
             Err(e) => e.as_bytes()
         };
 
+        let mut snippet;
+
+        if payload.len() < 20 {
+            snippet = String::from_utf8_lossy(payload);
+        } else {
+            snippet = String::from_utf8_lossy(&payload[..20]);
+        }
+
         write!(f,
             "[[ Packet: {}\n\t{}\n\t{}\n\tPayload: {} ]]",
-            eth, l3, l4, String::from_utf8_lossy(payload)
+            eth, l3, l4, snippet
         )
     }
 }
