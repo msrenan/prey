@@ -266,6 +266,56 @@ fn main() {
                             }
                         }
                         
+                    } else if protocol == IpProtocol::UDP {
+                        println!("It's a UDP packet!");
+                        let (l4, _) = match packet.l4_header() {
+                            Ok(data) => data,
+                            Err(e) => {
+                                println!("Error: {}", e);
+                                conn.read_buffer.clear();
+                                continue;
+                            }
+                        };
+
+                        let payload = match packet.payload() {
+                            Ok(data) => data,
+                            Err(e) => {
+                                println!("Error while extracting payload! [{}]", e);
+                                conn.read_buffer.clear();
+                                continue;
+                            }
+                        };
+
+                        match l4 {
+                            L4::UDP(udp) => {
+                                let response_data = b"This is your UDP response!";
+
+                                let mut response = pool.acquire().unwrap();
+
+
+                                match packet.build_udp_response(response.as_mut_slice(), response_data) {
+                                    Ok(n) => {
+                                        println!("{} bytes written!", n);
+                                        response.advance(n);
+                                        let writable = conn.write_buffer.as_mut_slice();
+                                        writable[..response.data().len()].copy_from_slice(&response.data());
+                                        conn.write_buffer.advance(response.data().len());
+                                        println!("Sending UDP reply!");
+                                        conn.send().unwrap();
+                                    },
+                                    Err(e) => {
+                                        println!("An error have ocurred: {}", e);
+                                        conn.read_buffer.clear();
+                                        continue;
+                                    }
+                                };
+                            },
+                            _ => {
+                                println!("This is not a UDP packet.");
+                                conn.read_buffer.clear();
+                                continue;
+                            }
+                        }
                     }
                 }
 

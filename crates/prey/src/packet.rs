@@ -844,6 +844,81 @@ impl<'a> Packet<'a> {
             _ => Err("You can't build a TCP RST from a non-TCP packet, and TCP only existis for IPv4/6 L3!")
         }
     }
+
+    pub fn build_udp_response(&self, buf: &mut [u8], response: &[u8]) -> Result<usize, &'static str> {
+        let mut packet: Vec<u8> = Vec::new();
+
+        let (eth, _) = match self.ethernet_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
+        let (l3, _) = match self.l3_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
+        let (l4, _) = match self.l4_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
+        match l3 {
+            L3::IPv4(ipv4, protocol) => {
+                if let IpProtocol::UDP = protocol {
+                    if let L4::UDP(udp) = l4 {
+
+                        let r_eth = EthernetHeader {
+                            dst_mac: eth.src_mac,
+                            src_mac: eth.dst_mac,
+                            ether_type: eth.ether_type
+                        };
+
+                        packet.extend_from_slice(&r_eth.serialize());
+
+                        let mut r_ipv4 = IPv4Header {
+                            checksum: 0,
+                            dst_ip: ipv4.src_ip,
+                            src_ip: ipv4.dst_ip,
+                            version: 4,
+                            ihl: ipv4.ihl,
+                            tos: ipv4.tos,
+                            total_len: (ipv4.ihl as u16) + 8 + (response.len() as u16),
+                            id: ipv4.id + 2,
+                            flags: ipv4.flags,
+                            protocol: IpProtocol::UDP,
+                            ttl: 64
+                        };
+
+                        r_ipv4.checksum = calculate_checksum_v4(&mut r_ipv4);
+                        packet.extend_from_slice(&r_ipv4.serialize());
+
+                        let r_udp = UdpHeader {
+                            checksum: 0x0000,
+                            dst_port: udp.src_port,
+                            src_port: udp.dst_port,
+                            length: 8 + response.len() as u16,
+                        };
+
+                        packet.extend_from_slice(&r_udp.serialize());
+
+                        packet.extend_from_slice(&response);
+
+                        buf[..packet.len()].copy_from_slice(&packet);
+                        Ok(packet.len())
+                    } else {
+                        Err("You can't build a UDP reply from a non-UDP packet.")
+                    }
+                } else {
+                    Err("You can't build a UDP reply from a non-UDP packet.")
+                }
+            },
+            L3::IPv6(ipv6, protocol) => {
+                Err("Not finished.")
+            },
+            _ => Err("You can't build a UDP reply from a non-UDP packet, and UDP only exists for IPv4/6 Ethernet Types.")
+        }
+    }
 }
 
 
@@ -1902,8 +1977,13 @@ pub fn calculate_l4_checksum_v4(l3: L3, l4_payload: &[u8]) -> u16 {
                 return calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip, 
                     p, l4_payload);
             } else if p == IpProtocol::UDP {
-                return calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip, 
+                let value = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip, 
                     p, l4_payload);
+                if value == 0xFFFF {
+                    0x0000
+                } else {
+                    value
+                }
             } else {
                 return 0;
             }
