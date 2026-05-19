@@ -5,6 +5,7 @@
 
 use std::{fmt, net::{Ipv4Addr, Ipv6Addr}};
 
+// <!---------------------------- PACKET STRUCT AND IMPL BLOCK ---------------------------------------->
 
 /// # Packet
 /// Struct that holds a pointer for the raw bytes of a packet in a buffer.
@@ -1052,22 +1053,9 @@ impl<'a> Packet<'a> {
     }
 }
 
+// <!---------------------------------------------------------------------------------------------------------->
 
-/// # EtherType
-/// Enum that contains all possibilites of ethernet type of a packet.
-/// 
-/// # Types
-/// - IPv4
-/// - IPv6
-/// - ARP
-/// - Unknown(`u16`) - Special type, for further customization or expansion of the framework
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EtherType {
-    IPv4,
-    IPv6,
-    ARP,
-    Unknown(u16)
-}
+// <!---------------------------------------- Header Structs ------------------------------------------------->
 
 /// # EthernetHeader
 /// Struct that defines and separate all information of packet's ethernet header.
@@ -1081,23 +1069,6 @@ pub struct EthernetHeader {
     pub dst_mac: [u8; 6],
     pub src_mac: [u8; 6],
     pub ether_type: EtherType
-}
-
-
-/// # IpProtocol
-/// Enum that contains all possibilities of packet's protocol.
-/// 
-/// # Types
-/// - TCP
-/// - UDP
-/// - ICMP
-/// - Unknown(u8) - Special type, for further customization or expansion of the framework
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum IpProtocol {
-    TCP,
-    UDP,
-    ICMP,
-    Unknown(u8)
 }
 
 /// # IPv4Header
@@ -1152,26 +1123,6 @@ pub struct IPv6Header {
     pub dst_ip: Ipv6Addr
 }
 
-/// # ArpOperation
-/// Enum containing all possibilities for a ARP package operation, based on its opcode.
-/// 
-/// # Types
-/// - Request
-/// - Reply
-/// - RRequest - Reverse Request (RARP Request)
-/// - RReply - Reverse Reply (RARP Reply)
-/// - IRequest - Inverted Request
-/// - IReply - Inverted Reply
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ArpOperation {
-    Request,
-    Reply,
-    RRequest,
-    RReply,
-    IRequest,
-    IReply
-}
-
 /// # ArpHeader
 /// Struct that defines and separates all information of packet's ARP Header.
 /// 
@@ -1214,17 +1165,6 @@ pub struct UdpHeader {
     pub checksum: u16,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TcpFlags {
-    SYN,
-    ACK,
-    FIN,
-    RST,
-    PSH,
-    URG,
-    Unknown(u8)
-}
-
 /// # TcpHeader
 /// Struct that defines and separates all information of packet's TCP Header.
 /// 
@@ -1251,14 +1191,6 @@ pub struct TcpHeader{
     pub urgent_pointer: u16
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum IcmpType {
-    Request,
-    Reply,
-    Unreachable,
-    Unknown(u8)
-}
-
 /// # IcmpHeader
 /// Struct that defines and separates all information of packet's TCP Header.
 /// 
@@ -1275,6 +1207,42 @@ pub struct IcmpHeader {
     pub checksum: u16,
     pub id: u16,
     pub seq_number: u16
+}
+
+// <!----------------------------------------------------------------------------------------------------------->
+
+// <!---------------------------------------------- Enums ------------------------------------------------------>
+
+/// # EtherType
+/// Enum that contains all possibilites of ethernet type of a packet.
+/// 
+/// # Types
+/// - IPv4
+/// - IPv6
+/// - ARP
+/// - Unknown(`u16`) - Special type, for further customization or expansion of the framework
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EtherType {
+    IPv4,
+    IPv6,
+    ARP,
+    Unknown(u16)
+}
+
+/// # IpProtocol
+/// Enum that contains all possibilities of packet's protocol.
+/// 
+/// # Types
+/// - TCP
+/// - UDP
+/// - ICMP
+/// - Unknown(u8) - Special type, for further customization or expansion of the framework
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IpProtocol {
+    TCP,
+    UDP,
+    ICMP,
+    Unknown(u8)
 }
 
 /// # L3
@@ -1311,7 +1279,52 @@ pub enum L4 {
     Unknown(u8)
 }
 
-//Trait implementation for PREY structs and enums
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IcmpType {
+    Request,
+    Reply,
+    Unreachable,
+    Unknown(u8)
+}
+
+
+/// # ArpOperation
+/// Enum containing all possibilities for a ARP package operation, based on its opcode.
+/// 
+/// # Types
+/// - Request
+/// - Reply
+/// - RRequest - Reverse Request (RARP Request)
+/// - RReply - Reverse Reply (RARP Reply)
+/// - IRequest - Inverted Request
+/// - IReply - Inverted Reply
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArpOperation {
+    Request,
+    Reply,
+    RRequest,
+    RReply,
+    IRequest,
+    IReply
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TcpFlags {
+    SYN,
+    ACK,
+    FIN,
+    RST,
+    PSH,
+    URG,
+    Unknown(u8)
+}
+
+// <!----------------------------------------------------------------------------------------------------------->
+
+// <!-------------------------------------- Trait implementations ---------------------------------------------->
+
+//                 1. FROM and fmt::DISPLAY traits ==================================================================
+
 impl From<u8> for TcpFlags {
     fn from(value: u8) -> Self {
         match value {
@@ -1554,7 +1567,7 @@ impl<'a> fmt::Display for Packet<'a> {
             Err(e) => e.as_bytes()
         };
 
-        let mut snippet;
+        let snippet;
 
         if payload.len() < 20 {
             snippet = String::from_utf8_lossy(payload);
@@ -1569,7 +1582,7 @@ impl<'a> fmt::Display for Packet<'a> {
     }
 }
 
-
+//                 2. Headers ==========================================================================================
 impl EthernetHeader {
     /// # fn parse
     /// Function that parses a slice of bytes into a EthernetHeader object.
@@ -1947,6 +1960,8 @@ impl TcpHeader {
     }
 }
 
+//                 3. Enums =============================================================================================
+
 impl EtherType {
     /// # fn serialize
     /// Function that turns each EtherType enum types back into its bytes.
@@ -2086,6 +2101,11 @@ impl TcpFlags {
     }
 }
 
+
+// <!-------------------------------------------------------------------------------------------------------------->
+
+// <!---------------------------------------- Aux Functions ------------------------------------------------------->
+
 pub fn calculate_checksum(raw: &[u8]) -> u16 {
     let mut sum: u32 = 0;
     
@@ -2184,3 +2204,5 @@ pub fn calculate_l4_checksum_v6(src_ip: &Ipv6Addr, dst_ip: &Ipv6Addr, next_heade
 
     checksum
 }
+
+// <!-------------------------------------------------------------------------------------------------------->

@@ -82,6 +82,13 @@ fn main() {
 
                     }
                 } else if let L3::IPv4(ipv4, protocol) = l3 {
+
+                    if ipv4.dst_ip != MY_IP {
+                        conn.read_buffer.clear();
+                        println!("Its not for me...");
+                        continue;
+                    }
+
                     if protocol == IpProtocol::ICMP {
                         println!("Its a ICMP packet!");
                         let mut response = pool.acquire().unwrap();
@@ -321,6 +328,16 @@ fn main() {
                                 continue;
                             }
                         }
+                    }
+                } else if let L3::IPv6(ipv6, protocol) = l3{
+                    if ipv6.dst_ip != MY_IP_6 {
+                        println!("It's not for me...");
+                        conn.read_buffer.clear();
+                        continue;
+                    }
+
+                    if protocol == IpProtocol::ICMP {
+                        
                     }
                 }
 
