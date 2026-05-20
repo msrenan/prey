@@ -381,6 +381,25 @@ fn main() {
                                 }
                             }
                         }
+                    } else if let L4::UDP(udp) = l4 {
+                        if udp.dst_port != 8080 as u16 {
+                            println!("BLOCKED PORT V6!!");
+                            let mut response = pool.acquire().unwrap();
+                            match packet.build_icmp_reject(response.as_mut_slice()) {
+                                Ok(n) => {
+                                    response.advance(n);
+                                    let space = conn.write_buffer.as_mut_slice();
+                                    space[..response.data().len()].copy_from_slice(&response.data());
+                                    conn.write_buffer.advance(response.data().len());
+                                    conn.send().unwrap();
+                                },
+                                Err(e) => {
+                                    println!("Error while sending NDP-NA reply: {}", e);
+                                    conn.read_buffer.clear();
+                                    continue;
+                                }
+                            }
+                        }
                     }
                 }
 

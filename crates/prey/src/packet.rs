@@ -371,7 +371,7 @@ impl<'a> Packet<'a> {
                 if protocol == IpProtocol::ICMPv6 {
                     let l4 = self.l4_header().unwrap().0;
                     
-                    if let L4::ICMPv6(_) = l4 {
+                    if let L4::ICMPv6(icmpv6) = l4 {
                         let r_eth = EthernetHeader {
                             src_mac: eth.dst_mac,
                             dst_mac: eth.src_mac,
@@ -397,24 +397,26 @@ impl<'a> Packet<'a> {
                         body_bytes.copy_from_slice(&payload[..4]); 
 
 
-                        let mut r_icmpv6 = IcmpV6Header {
-                            checksum: 0,
-                            code: 0,
-                            msg_type: MsgType::Reply,
-                            msg_body: MsgBody::parse(MsgType::Reply, &body_bytes)
-                        };
+                        if let MsgBody::Request { id, seq_number } = icmpv6.msg_body {
+                                let mut r_icmpv6 = IcmpV6Header {
+                                checksum: 0,
+                                code: 0,
+                                msg_type: MsgType::Reply,
+                                msg_body: MsgBody::Reply { id, seq_number }
+                            };
 
-                        let mut ndp_body: Vec<u8> = Vec::with_capacity(32);
-                        ndp_body.extend_from_slice(&r_icmpv6.serialize());
-                        ndp_body.extend_from_slice(&payload[4..]);
-                        
+                            let mut ndp_body: Vec<u8> = Vec::with_capacity(32);
+                            ndp_body.extend_from_slice(&r_icmpv6.serialize());
+                            ndp_body.extend_from_slice(&payload[4..]);
+                            
 
-                        r_icmpv6.checksum = calculate_l4_checksum_v6(&ipv6.dst_ip, &ipv6.src_ip, IpProtocol::ICMPv6, &ndp_body);
+                            r_icmpv6.checksum = calculate_l4_checksum_v6(&ipv6.dst_ip, &ipv6.src_ip, IpProtocol::ICMPv6, &ndp_body);
 
-                        packet.extend_from_slice(&r_icmpv6.serialize());
-                        packet.extend_from_slice(&ndp_body[8..]);
+                            packet.extend_from_slice(&r_icmpv6.serialize());
+                            packet.extend_from_slice(&ndp_body[8..]);
 
-                        buf[..packet.len()].copy_from_slice(&packet);
+                            buf[..packet.len()].copy_from_slice(&packet);
+                        }
                     } else {
                         return Err("You can't build a ICMP reply from a non ICMP packet");
                     }
@@ -450,7 +452,6 @@ impl<'a> Packet<'a> {
 
         match l3 {
             L3::IPv4(ipv4, _) => {
-
                 if let L4::UDP(udp) = l4 {
                     let r_eth = EthernetHeader {
                         src_mac: eth.dst_mac,
@@ -549,7 +550,49 @@ impl<'a> Packet<'a> {
                 Ok(packet.len())
             },
             L3::IPv6(ipv6, _) => {
-                Err("Not finished.")
+                if let L4::UDP(udp) = l4 {
+                    let r_eth = EthernetHeader {
+                        dst_mac: eth.src_mac,
+                        src_mac: eth.dst_mac,
+                        ether_type: EtherType::IPv6
+                    };
+
+                    packet.extend_from_slice(&r_eth.serialize());
+
+                    let r_ipv6 = IPv6Header {
+                        class: ipv6.class,
+                        version: 6,
+                        flow: ipv6.flow,
+                        payload_length: 56,
+                        next_header: IpProtocol::ICMPv6,
+                        hop_limit: 64,
+                        src_ip: ipv6.dst_ip,
+                        dst_ip: ipv6.src_ip
+                    };
+
+                    packet.extend_from_slice(&r_ipv6.serialize());
+
+                    let mut r_icmp = IcmpV6Header {
+                        checksum: 0,
+                        msg_type: MsgType::Unreachable,
+                        code: 4,
+                        msg_body: MsgBody::Unreachable { unused: 0 }
+                    };
+
+                    let mut body: Vec<u8> = Vec::with_capacity(56);
+                    body.extend_from_slice(&r_icmp.serialize());
+
+                    body.extend_from_slice(&ipv6.serialize());
+                    body.extend_from_slice(&udp.serialize());
+                    r_icmp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, 
+                        &ipv6.dst_ip, r_ipv6.next_header, &body);
+
+                    packet.extend_from_slice(&r_icmp.serialize());
+                    packet.extend_from_slice(&body[8..]);
+                }
+
+                buf[..packet.len()].copy_from_slice(&packet);
+                Ok(packet.len())
             },
             _ => Err("This packet is not part of a Connection that can be denied.")
         }
@@ -1820,7 +1863,7 @@ impl<'a> fmt::Display for Packet<'a> {
 
         let snippet;
 
-        if payload.len() < 1000 {
+        if payload.len() < 20 {
             snippet = String::from_utf8_lossy(payload);
         } else {
             snippet = String::from_utf8_lossy(&payload[..20]);
