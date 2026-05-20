@@ -331,7 +331,7 @@ fn main() {
                             }
                         }
                     }
-                } else if let L3::IPv6(ipv6, protocol) = l3{
+                } else if let L3::IPv6(ipv6, _) = l3{
                     if ipv6.dst_ip != MY_IP_6 && ipv6.dst_ip.segments()[0] != BROAD_PREFIX  {
                         println!("It's not for me...");
                         conn.read_buffer.clear();
@@ -399,6 +399,148 @@ fn main() {
                                     continue;
                                 }
                             }
+                        }
+                    } else if let L4::TCP(tcp) = l4 {
+                        let payload = match packet.payload() {
+                            Ok(data) => data,
+                            Err(e) => {
+                                println!("Error while extracting payload: {}", e);
+                                conn.read_buffer.clear();
+                                continue;
+                            }
+                        };
+                        let flags = TcpFlags::parse(tcp.flags);
+                        if flags == [TcpFlags::SYN] {
+                            /*if ipv4.src_ip == Ipv4Addr::new(172, 16, 50, 1) {
+                                let mut response = pool.acquire().unwrap();
+                                println!("[PREY] :: BLOCKED IP DETECTED!");
+                                match packet.build_tcp_rst(response.as_mut_slice()) {
+                                    Ok(n) => {
+                                        response.advance(n);
+                                        println!("{} bytes written!", n);
+                                        let space = conn.write_buffer.as_mut_slice();
+                                        space[..response.data().len()].copy_from_slice(&response.data());
+                                        conn.write_buffer.advance(response.data().len());
+
+                                        println!("Sending TCP RST!");
+                                        conn.send().unwrap();
+                                        conn.read_buffer.clear();
+                                        continue;
+                                    },
+                                    Err(e) => {
+                                        println!("Error while building ACK: {}", e);
+                                        conn.read_buffer.clear();
+                                        continue;
+                                    }
+                                }
+                            } Uncomment if you want to test some IP blocking.*/
+                            let mut response = pool.acquire().unwrap();
+                            match packet.build_tcp_syn_ack(response.as_mut_slice()) {
+                                Ok(n) => {
+                                    response.advance(n);
+                                    println!("{} bytes written!", n);
+                                    let space = conn.write_buffer.as_mut_slice();
+                                    space[..response.data().len()].copy_from_slice(&response.data());
+                                    conn.write_buffer.advance(response.data().len());
+
+                                    println!("Sending TCP SYN-ACK!");
+                                    conn.send().unwrap();
+                                },
+                                Err(e) => {
+                                    println!("Error while building SYN-ACK: {}", e);
+                                    conn.read_buffer.clear();
+                                    continue;
+                                }
+                            }
+                        } else if flags == [TcpFlags::ACK] {
+                            println!("TCP-ACK received! Connection either Established or Finished!");
+                            conn.read_buffer.clear();
+                        } else if flags == [TcpFlags::PSH, TcpFlags::ACK] {
+                            let request = String::from_utf8_lossy(&payload);
+                            println!("Packet have been acquired.");
+                            let mut response_payload = format!("You have sent: {} to PREY!\n", request.replace("\n", ""));
+                            println!("{}", request);
+                            if request.contains("HTTP") {
+                                let body = "You have sent a HTTP request to PREY!";
+                                response_payload = format!(
+                                    "HTTP/1.1 200 OK\r\n\
+                                    Content-Type: text\r\n\
+                                    Content-Length: {}\r\n\
+                                    \r\n\
+                                    {}",
+                                    body.len(), body
+                                );
+                            }
+
+                            let mut response = pool.acquire().unwrap();
+                            
+                            {
+                                if request.contains("virus") {
+                                    println!("[PREY] :: VIRUS DETECTED!");
+                                    match packet.build_tcp_rst(response.as_mut_slice()) {
+                                        Ok(n) => {
+                                            response.advance(n);
+                                            println!("{} bytes written!", n);
+                                            let space = conn.write_buffer.as_mut_slice();
+                                            space[..response.data().len()].copy_from_slice(&response.data());
+                                            conn.write_buffer.advance(response.data().len());
+
+                                            println!("Sending TCP RST!");
+                                            conn.send().unwrap();
+                                            conn.read_buffer.clear();
+                                            continue;
+                                        },
+                                        Err(e) => {
+                                            println!("Error while building ACK: {}", e);
+                                            conn.read_buffer.clear();
+                                            continue;
+                                        }
+                                    }
+                                }
+
+                                match packet.build_tcp_response(response.as_mut_slice(), response_payload.as_bytes()) {
+                                    Ok(n) => {
+                                        response.advance(n);
+                                        println!("{} bytes written!", n);
+                                        let space = conn.write_buffer.as_mut_slice();
+                                        space[..response.data().len()].copy_from_slice(&response.data());
+                                        conn.write_buffer.advance(response.data().len());
+
+                                        println!("Sending TCP ACK!");
+                                        conn.send().unwrap();
+                                    },
+                                    Err(e) => {
+                                        println!("Error while building ACK: {}", e);
+                                        conn.read_buffer.clear();
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            println!("Sent back ACK repsonse!");
+                        } else if flags == [TcpFlags::FIN, TcpFlags::ACK] {
+                            println!("Client have nothing to send anymore.");
+                            let mut response = pool.acquire().unwrap();
+                            {
+                                match packet.build_tcp_fin_ack(response.as_mut_slice()) {
+                                    Ok(n) => {
+                                        response.advance(n);
+                                        println!("{} bytes written!", n);
+                                        let space = conn.write_buffer.as_mut_slice();
+                                        space[..response.data().len()].copy_from_slice(&response.data());
+                                        conn.write_buffer.advance(response.data().len());
+
+                                        println!("Sending TCP ACK!");
+                                        conn.send().unwrap();
+                                    },
+                                    Err(e) => {
+                                        println!("Error while building ACK: {}", e);
+                                        conn.read_buffer.clear();
+                                        continue;
+                                    }
+                                }
+                            }
+                            println!("Sent back FIN-ACK repsonse! Connection should be killed.");
                         }
                     }
                 }

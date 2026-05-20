@@ -5,6 +5,7 @@
 
 use std::{fmt, net::{Ipv4Addr, Ipv6Addr}};
 
+
 // <!---------------------------- PACKET STRUCT AND IMPL BLOCK ---------------------------------------->
 
 /// # Packet
@@ -612,18 +613,18 @@ impl<'a> Packet<'a> {
             Err(e) => {return Err(e); }
         };
 
+        let (l4, _) = match self.l4_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
+        let payload = match self.payload() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
         match l3 {
             L3::IPv4(ipv4, protocol) => {
                 if protocol == IpProtocol::TCP {
-
-                    let (l4, _) = match self.l4_header() {
-                        Ok(data) => data,
-                        Err(e) => { return Err(e); }
-                    };
-                    let payload = match self.payload() {
-                        Ok(data) => data,
-                        Err(e) => { return Err(e); }
-                    };
 
                     if let L4::TCP(tcp) = l4 {
 
@@ -684,8 +685,57 @@ impl<'a> Packet<'a> {
                     Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
                 }
             },
-            L3::IPv6(ipv6, protocol) => {
-                Err("Still not finished.")
+            L3::IPv6(ipv6, _) => {
+                if let L4::TCP(tcp) = l4 {
+
+                    let r_eth = EthernetHeader {
+                        dst_mac: eth.src_mac,
+                        src_mac: eth.dst_mac,
+                        ether_type: EtherType::IPv6
+                    };
+
+                    packet.extend_from_slice(&r_eth.serialize());
+
+                    let r_ipv6 = IPv6Header {
+                        class: ipv6.class,
+                        version: 6,
+                        flow: ipv6.flow,
+                        payload_length: 20,
+                        next_header: IpProtocol::TCP,
+                        hop_limit: 64,
+                        src_ip: ipv6.dst_ip,
+                        dst_ip: ipv6.src_ip
+                    };
+
+                    packet.extend_from_slice(&r_ipv6.serialize());
+
+                    let mut r_tcp = TcpHeader {
+                        ack_number: tcp.seq_number + 1,
+                        seq_number: tcp.seq_number + 25,
+                        src_port: tcp.dst_port,
+                        dst_port: tcp.src_port,
+                        data_offset: 20,
+                        flags: TcpFlags::serialize(&[TcpFlags::SYN, TcpFlags::ACK]),
+                        window_size: 64240,
+                        checksum: 0,
+                        urgent_pointer: 0
+                    };
+
+                    let mut body: Vec<u8> = Vec::with_capacity(r_tcp.data_offset as usize + payload.len());
+                    body.extend_from_slice(&r_tcp.serialize());
+                    body.extend_from_slice(&payload);
+
+                    r_tcp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, &ipv6.dst_ip, 
+                        r_ipv6.next_header, &body);
+
+                    packet.extend_from_slice(&r_tcp.serialize());
+                    packet.extend_from_slice(&body[(r_tcp.data_offset as usize)..]);
+                } else {
+                    return Err("You can't build a TCP SYN-ACK from a non-TCP packet.");
+                }
+
+                buf[..packet.len()].copy_from_slice(&packet);
+                Ok(packet.len())
             },
             _ => Err("You can't build a TCP SYN-ACK from a non-TCP packet, and TCP only existis for IPv4/6 L3!")
         }
@@ -704,19 +754,18 @@ impl<'a> Packet<'a> {
             Err(e) => {return Err(e); }
         };
 
+        let (l4, _) = match self.l4_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+        let payload = match self.payload() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
         match l3 {
             L3::IPv4(ipv4, protocol) => {
                 if protocol == IpProtocol::TCP {
-
-                    let (l4, _) = match self.l4_header() {
-                        Ok(data) => data,
-                        Err(e) => { return Err(e); }
-                    };
-                    let payload = match self.payload() {
-                        Ok(data) => data,
-                        Err(e) => { return Err(e); }
-                    };
-
                     if let L4::TCP(tcp) = l4 {
 
                         let r_eth = EthernetHeader {
@@ -776,8 +825,55 @@ impl<'a> Packet<'a> {
                     Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
                 }
             },
-            L3::IPv6(ipv6, protocol) => {
-                Err("Still not finished.")
+            L3::IPv6(ipv6, _) => {
+                if let L4::TCP(tcp) = l4 {
+
+                    let r_eth = EthernetHeader {
+                        dst_mac: eth.src_mac,
+                        src_mac: eth.dst_mac,
+                        ether_type: EtherType::IPv6
+                    };
+
+                    packet.extend_from_slice(&r_eth.serialize());
+
+                    let r_ipv6 = IPv6Header {
+                        class: ipv6.class,
+                        version: 6,
+                        flow: ipv6.flow,
+                        payload_length: 20,
+                        next_header: IpProtocol::TCP,
+                        hop_limit: 64,
+                        src_ip: ipv6.dst_ip,
+                        dst_ip: ipv6.src_ip
+                    };
+
+                    packet.extend_from_slice(&r_ipv6.serialize());
+
+                    let mut r_tcp = TcpHeader {
+                        ack_number: tcp.seq_number + payload.len() as u32,
+                        seq_number: tcp.ack_number,
+                        src_port: tcp.dst_port,
+                        dst_port: tcp.src_port,
+                        data_offset: 20,
+                        flags: TcpFlags::serialize(&[TcpFlags::ACK]),
+                        window_size: 64240,
+                        checksum: 0,
+                        urgent_pointer: 0
+                    };
+
+                    let mut body: Vec<u8> = Vec::with_capacity(r_tcp.data_offset as usize + payload.len());
+                    body.extend_from_slice(&r_tcp.serialize());
+
+                    r_tcp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, &ipv6.dst_ip, 
+                        r_ipv6.next_header, &body);
+
+                    packet.extend_from_slice(&r_tcp.serialize());
+                } else {
+                    return Err("You can't build a TCP SYN-ACK from a non-TCP packet.");
+                }
+
+                buf[..packet.len()].copy_from_slice(&packet);
+                Ok(packet.len())
             },
             _ => Err("You can't build a TCP SYN-ACK from a non-TCP packet, and TCP only existis for IPv4/6 L3!")
         }
@@ -796,19 +892,19 @@ impl<'a> Packet<'a> {
             Err(e) => {return Err(e); }
         };
 
+        let (l4, _) = match self.l4_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
+        let payload = match self.payload() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
         match l3 {
             L3::IPv4(ipv4, protocol) => {
                 if protocol == IpProtocol::TCP {
-
-                    let (l4, _) = match self.l4_header() {
-                        Ok(data) => data,
-                        Err(e) => { return Err(e); }
-                    };
-                    let payload = match self.payload() {
-                        Ok(data) => data,
-                        Err(e) => { return Err(e); }
-                    };
-
                     if let L4::TCP(tcp) = l4 {
 
                         let r_eth = EthernetHeader {
@@ -868,8 +964,56 @@ impl<'a> Packet<'a> {
                     Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
                 }
             },
-            L3::IPv6(ipv6, protocol) => {
-                Err("Still not finished.")
+            L3::IPv6(ipv6, _) => {
+                if let L4::TCP(tcp) = l4 {
+
+                    let r_eth = EthernetHeader {
+                        dst_mac: eth.src_mac,
+                        src_mac: eth.dst_mac,
+                        ether_type: EtherType::IPv6
+                    };
+
+                    packet.extend_from_slice(&r_eth.serialize());
+
+                    let r_ipv6 = IPv6Header {
+                        class: ipv6.class,
+                        version: 6,
+                        flow: ipv6.flow,
+                        payload_length: 20,
+                        next_header: IpProtocol::TCP,
+                        hop_limit: 64,
+                        src_ip: ipv6.dst_ip,
+                        dst_ip: ipv6.src_ip
+                    };
+
+                    packet.extend_from_slice(&r_ipv6.serialize());
+
+                    let mut r_tcp = TcpHeader {
+                        ack_number: tcp.seq_number + 1 + payload.len() as u32,
+                        seq_number: tcp.ack_number,
+                        src_port: tcp.dst_port,
+                        dst_port: tcp.src_port,
+                        data_offset: 20,
+                        flags: TcpFlags::serialize(&[TcpFlags::FIN, TcpFlags::ACK]),
+                        window_size: 64240,
+                        checksum: 0,
+                        urgent_pointer: 0
+                    };
+
+                    let mut body: Vec<u8> = Vec::with_capacity(r_tcp.data_offset as usize + payload.len());
+                    body.extend_from_slice(&r_tcp.serialize());
+
+                    r_tcp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, &ipv6.dst_ip, 
+                        r_ipv6.next_header, &body);
+
+                    packet.extend_from_slice(&r_tcp.serialize());
+
+                } else {
+                    return Err("You can't build a TCP SYN-ACK from a non-TCP packet.");
+                }
+
+                buf[..packet.len()].copy_from_slice(&packet);
+                Ok(packet.len())
             },
             _ => Err("You can't build a TCP SYN-ACK from a non-TCP packet, and TCP only existis for IPv4/6 L3!")
         }
@@ -888,19 +1032,19 @@ impl<'a> Packet<'a> {
             Err(e) => {return Err(e); }
         };
 
+        let (l4, _) = match self.l4_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
+        let payload = match self.payload() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
         match l3 {
             L3::IPv4(ipv4, protocol) => {
                 if protocol == IpProtocol::TCP {
-
-                    let (l4, _) = match self.l4_header() {
-                        Ok(data) => data,
-                        Err(e) => { return Err(e); }
-                    };
-                    let payload = match self.payload() {
-                        Ok(data) => data,
-                        Err(e) => { return Err(e); }
-                    };
-
                     if let L4::TCP(tcp) = l4 {
 
                         let r_eth = EthernetHeader {
@@ -961,8 +1105,57 @@ impl<'a> Packet<'a> {
                     Err("You can't build a TCP SYN-ACK from a non-TCP packet.")
                 }
             },
-            L3::IPv6(ipv6, protocol) => {
-                Err("Still not finished.")
+            L3::IPv6(ipv6, _) => {
+                if let L4::TCP(tcp) = l4 {
+
+                    let r_eth = EthernetHeader {
+                        dst_mac: eth.src_mac,
+                        src_mac: eth.dst_mac,
+                        ether_type: EtherType::IPv6
+                    };
+
+                    packet.extend_from_slice(&r_eth.serialize());
+
+                    let r_ipv6 = IPv6Header {
+                        class: ipv6.class,
+                        version: 6,
+                        flow: ipv6.flow,
+                        payload_length: 20 + response.len() as u16,
+                        next_header: IpProtocol::TCP,
+                        hop_limit: 64,
+                        src_ip: ipv6.dst_ip,
+                        dst_ip: ipv6.src_ip
+                    };
+
+                    packet.extend_from_slice(&r_ipv6.serialize());
+
+                    let mut r_tcp = TcpHeader {
+                        ack_number: tcp.seq_number + payload.len() as u32,
+                        seq_number: tcp.ack_number,
+                        src_port: tcp.dst_port,
+                        dst_port: tcp.src_port,
+                        data_offset: 20,
+                        flags: TcpFlags::serialize(&[TcpFlags::PSH, TcpFlags::ACK]),
+                        window_size: 64240,
+                        checksum: 0,
+                        urgent_pointer: 0
+                    };
+
+                    let mut body: Vec<u8> = Vec::with_capacity(r_tcp.data_offset as usize + payload.len());
+                    body.extend_from_slice(&r_tcp.serialize());
+                    body.extend_from_slice(&response);
+
+                    r_tcp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, &ipv6.dst_ip, 
+                        r_ipv6.next_header, &body);
+
+                    packet.extend_from_slice(&r_tcp.serialize());
+                    packet.extend_from_slice(&body[(r_tcp.data_offset as usize)..]);
+                } else {
+                    return Err("You can't build a TCP SYN-ACK from a non-TCP packet.");
+                }
+
+                buf[..packet.len()].copy_from_slice(&packet);
+                Ok(packet.len())
             },
             _ => Err("You can't build a TCP SYN-ACK from a non-TCP packet, and TCP only existis for IPv4/6 L3!")
         }
@@ -981,19 +1174,18 @@ impl<'a> Packet<'a> {
             Err(e) => {return Err(e); }
         };
 
+        let (l4, _) = match self.l4_header() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+        let payload = match self.payload() {
+            Ok(data) => data,
+            Err(e) => { return Err(e); }
+        };
+
         match l3 {
             L3::IPv4(ipv4, protocol) => {
                 if protocol == IpProtocol::TCP {
-
-                    let (l4, _) = match self.l4_header() {
-                        Ok(data) => data,
-                        Err(e) => { return Err(e); }
-                    };
-                    let payload = match self.payload() {
-                        Ok(data) => data,
-                        Err(e) => { return Err(e); }
-                    };
-
                     if let L4::TCP(tcp) = l4 {
 
                         let r_eth = EthernetHeader {
@@ -1060,8 +1252,56 @@ impl<'a> Packet<'a> {
                     Err("You can't build a TCP RST from a non-TCP packet.")
                 }
             },
-            L3::IPv6(ipv6, protocol) => {
-                Err("Still not finished.")
+            L3::IPv6(ipv6, _) => {
+                if let L4::TCP(tcp) = l4 {
+
+                    let r_eth = EthernetHeader {
+                        dst_mac: eth.src_mac,
+                        src_mac: eth.dst_mac,
+                        ether_type: EtherType::IPv6
+                    };
+
+                    packet.extend_from_slice(&r_eth.serialize());
+
+                    let r_ipv6 = IPv6Header {
+                        class: ipv6.class,
+                        version: 6,
+                        flow: ipv6.flow,
+                        payload_length: 20,
+                        next_header: IpProtocol::TCP,
+                        hop_limit: 64,
+                        src_ip: ipv6.dst_ip,
+                        dst_ip: ipv6.src_ip
+                    };
+
+                    packet.extend_from_slice(&r_ipv6.serialize());
+
+                    let mut r_tcp = TcpHeader {
+                        ack_number: 0,
+                        seq_number: 0,
+                        src_port: tcp.dst_port,
+                        dst_port: tcp.src_port,
+                        data_offset: 20,
+                        flags: TcpFlags::serialize(&[TcpFlags::RST, TcpFlags::ACK]),
+                        window_size: 0,
+                        checksum: 0,
+                        urgent_pointer: 0
+                    };
+
+                    let mut body: Vec<u8> = Vec::with_capacity(r_tcp.data_offset as usize + payload.len());
+                    body.extend_from_slice(&r_tcp.serialize());
+
+                    r_tcp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, &ipv6.dst_ip, 
+                        r_ipv6.next_header, &body);
+
+                    packet.extend_from_slice(&r_tcp.serialize());
+                    packet.extend_from_slice(&body[(r_tcp.data_offset as usize)..]);
+                } else {
+                    return Err("You can't build a TCP SYN-ACK from a non-TCP packet.");
+                }
+
+                buf[..packet.len()].copy_from_slice(&packet);
+                Ok(packet.len())
             },
             _ => Err("You can't build a TCP RST from a non-TCP packet, and TCP only existis for IPv4/6 L3!")
         }
@@ -2622,7 +2862,5 @@ pub fn calculate_l4_checksum_v6(src_ip: &Ipv6Addr, dst_ip: &Ipv6Addr, next_heade
 
     checksum
 }
-
-// Fazer os 2bytes reserved variando conforme msg type.
 
 // <!-------------------------------------------------------------------------------------------------------->
