@@ -1,6 +1,6 @@
 
 use std::{io, net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4}};
-use prey::{buffer::BufferPool, network::{Connection, RawSocket}, packet::{ArpOperation, IcmpV6Type, IpProtocol, L3, L4, Packet, TcpFlags}};
+use prey::{buffer::BufferPool, network::{Connection, RawSocket}, packet::{ArpOperation, MsgType, IpProtocol, L3, L4, Packet, TcpFlags}};
 
 const MY_IP: Ipv4Addr = Ipv4Addr::new(172, 16, 50, 2);
 const MY_IP_6: Ipv6Addr = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0002);
@@ -348,7 +348,7 @@ fn main() {
                     };
 
                     if let L4::ICMPv6(icmpv6) = l4 {
-                        if icmpv6.msg_type == IcmpV6Type::NS {
+                        if icmpv6.msg_type == MsgType::NS {
                             let mut response = pool.acquire().unwrap();
                             match packet.build_ndp_na(response.as_mut_slice(), MY_IP_6, MY_MAC) {
                                 Ok(n) => {
@@ -364,7 +364,7 @@ fn main() {
                                     continue;
                                 }
                             }
-                        } else  if icmpv6.msg_type == IcmpV6Type::Request {
+                        } else  if icmpv6.msg_type == MsgType::Request {
                             let mut response = pool.acquire().unwrap();
                             match packet.build_icmp_reply(response.as_mut_slice()) {
                                 Ok(n) => {

@@ -371,7 +371,7 @@ impl<'a> Packet<'a> {
                 if protocol == IpProtocol::ICMPv6 {
                     let l4 = self.l4_header().unwrap().0;
                     
-                    if let L4::ICMPv6(header) = l4 {
+                    if let L4::ICMPv6(_) = l4 {
                         let r_eth = EthernetHeader {
                             src_mac: eth.dst_mac,
                             dst_mac: eth.src_mac,
@@ -393,21 +393,26 @@ impl<'a> Packet<'a> {
 
                         packet.extend_from_slice(&r_ipv6.serialize());
 
+                        let mut body_bytes: [u8; 4] = [0, 0, 0, 0];
+                        body_bytes.copy_from_slice(&payload[..4]); 
+
+
                         let mut r_icmpv6 = IcmpV6Header {
                             checksum: 0,
                             code: 0,
-                            msg_type: IcmpV6Type::Reply
+                            msg_type: MsgType::Reply,
+                            msg_body: MsgBody::parse(MsgType::Reply, &body_bytes)
                         };
 
                         let mut ndp_body: Vec<u8> = Vec::with_capacity(32);
                         ndp_body.extend_from_slice(&r_icmpv6.serialize());
-                        ndp_body.extend_from_slice(&payload);
+                        ndp_body.extend_from_slice(&payload[4..]);
                         
 
                         r_icmpv6.checksum = calculate_l4_checksum_v6(&ipv6.dst_ip, &ipv6.src_ip, IpProtocol::ICMPv6, &ndp_body);
 
                         packet.extend_from_slice(&r_icmpv6.serialize());
-                        packet.extend_from_slice(&ndp_body[4..]);
+                        packet.extend_from_slice(&ndp_body[8..]);
 
                         buf[..packet.len()].copy_from_slice(&packet);
                     } else {
@@ -1138,12 +1143,12 @@ impl<'a> Packet<'a> {
                 let mut r_icmpv6 = IcmpV6Header {
                     checksum: 0,
                     code: 0,
-                    msg_type: IcmpV6Type::NA
+                    msg_type: MsgType::NA,
+                    msg_body: MsgBody::parse(MsgType::NA, &[0x60, 0x00, 0x00, 0x00])
                 };
 
                 let mut ndp_body: Vec<u8> = Vec::with_capacity(32);
                 ndp_body.extend_from_slice(&r_icmpv6.serialize());
-                ndp_body.extend_from_slice(&[0x60, 0x00, 0x00, 0x00]);
                 ndp_body.extend_from_slice(&ip.octets());
                 ndp_body.extend_from_slice(&[0x02]);
                 ndp_body.extend_from_slice(&[0x01]);
@@ -1152,7 +1157,7 @@ impl<'a> Packet<'a> {
                 r_icmpv6.checksum = calculate_l4_checksum_v6(&ip, &ipv6.src_ip, IpProtocol::ICMPv6, &ndp_body);
 
                 packet.extend_from_slice(&r_icmpv6.serialize());
-                packet.extend_from_slice(&ndp_body[4..]);
+                packet.extend_from_slice(&ndp_body[8..]);
 
                 buf[..packet.len()].copy_from_slice(&packet);
 
@@ -1326,9 +1331,10 @@ pub struct IcmpHeader {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct IcmpV6Header {
-    pub msg_type: IcmpV6Type,
+    pub msg_type: MsgType,
     pub code: u8,
     pub checksum: u16,
+    pub msg_body: MsgBody
 }
 
 // <!----------------------------------------------------------------------------------------------------------->
@@ -1444,7 +1450,7 @@ pub enum TcpFlags {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum IcmpV6Type {
+pub enum MsgType {
     Unreachable,
     TooBig,
     TimeExceeded,
@@ -1456,6 +1462,47 @@ pub enum IcmpV6Type {
     NS,
     NA,
     Unknown(u8)
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum MsgBody {
+    Unreachable {
+        unused: u32
+    },
+    TimeExceeded {
+        unused: u32
+    },
+    TooBig {
+        mtu: u32
+    },
+    ParamProblem {
+        pointer: u32
+    },
+    Request {
+        id: u16,
+        seq_number: u16
+    },
+    Reply {
+        id: u16,
+        seq_number: u16
+    },
+    RS {
+        reserved: u32
+    },
+    RA {
+        mo: u8,
+        r_lifetime: u16,
+        hop_limit: u8
+    },
+    NS {
+        reserved: u32
+    },
+    NA {
+        rso: u32
+    },
+    Unknown {
+        bytes: [u8; 4]
+    }
 }
 
 // <!----------------------------------------------------------------------------------------------------------->
@@ -1526,20 +1573,20 @@ impl From<u8> for IcmpType {
     }
 }
 
-impl From<u8> for IcmpV6Type {
+impl From<u8> for MsgType {
     fn from(value: u8) -> Self {
         match value {
-            0x01 => IcmpV6Type::Unreachable,
-            0x02 => IcmpV6Type::TooBig,
-            0x03 => IcmpV6Type::TimeExceeded,
-            0x04 => IcmpV6Type::ParamProblem,
-            0x80 => IcmpV6Type::Request,
-            0x81 => IcmpV6Type::Reply,
-            0x85 => IcmpV6Type::RS,
-            0x86 => IcmpV6Type::RA,
-            0x87 => IcmpV6Type::NS,
-            0x88 => IcmpV6Type::NA,
-            _ => IcmpV6Type::Unknown(value)
+            0x01 => MsgType::Unreachable,
+            0x02 => MsgType::TooBig,
+            0x03 => MsgType::TimeExceeded,
+            0x04 => MsgType::ParamProblem,
+            0x80 => MsgType::Request,
+            0x81 => MsgType::Reply,
+            0x85 => MsgType::RS,
+            0x86 => MsgType::RA,
+            0x87 => MsgType::NS,
+            0x88 => MsgType::NA,
+            _ => MsgType::Unknown(value)
         }
     }
 }
@@ -1605,20 +1652,38 @@ impl fmt::Display for IcmpType {
     }
 }
 
-impl fmt::Display for IcmpV6Type {
+impl fmt::Display for MsgType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IcmpV6Type::Unreachable => write!(f, "Destination Unreachable"),
-            IcmpV6Type::TooBig => write!(f, "Packet is Too Big"),
-            IcmpV6Type::TimeExceeded => write!(f, "Time Exceeded"),
-            IcmpV6Type::ParamProblem => write!(f, "Parameter Problem"),
-            IcmpV6Type::Request => write!(f, "Echo Request"),
-            IcmpV6Type::Reply => write!(f, "Echo Reply"),
-            IcmpV6Type::RS => write!(f, "Router Solicitation"),
-            IcmpV6Type::RA => write!(f, "Router Advertisement"),
-            IcmpV6Type::NS => write!(f, "Neighbor Solicitation"),
-            IcmpV6Type::NA => write!(f, "Neighbor Advertisement"),
-            IcmpV6Type::Unknown(value) => write!(f, "Unknown type: {}", value)
+            MsgType::Unreachable => write!(f, "Destination Unreachable"),
+            MsgType::TooBig => write!(f, "Packet is Too Big"),
+            MsgType::TimeExceeded => write!(f, "Time Exceeded"),
+            MsgType::ParamProblem => write!(f, "Parameter Problem"),
+            MsgType::Request => write!(f, "Echo Request"),
+            MsgType::Reply => write!(f, "Echo Reply"),
+            MsgType::RS => write!(f, "Router Solicitation"),
+            MsgType::RA => write!(f, "Router Advertisement"),
+            MsgType::NS => write!(f, "Neighbor Solicitation"),
+            MsgType::NA => write!(f, "Neighbor Advertisement"),
+            MsgType::Unknown(value) => write!(f, "Unknown type: {}", value)
+        }
+    }
+}
+
+impl fmt::Display for MsgBody {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MsgBody::NA { rso } => write!(f, "(RSO={})", rso),
+            MsgBody::NS { reserved } => write!(f, "(reserved={})", reserved),
+            MsgBody::ParamProblem { pointer } => write!(f, "(pointer={})", pointer),
+            MsgBody::RA { mo, r_lifetime, hop_limit } => write!(f, "(mo={}, router lifetime={}, hop_limit={})", mo, r_lifetime, hop_limit),
+            MsgBody::RS { reserved } => write!(f, "(reserved={})", reserved),
+            MsgBody::Reply { id, seq_number } => write!(f, "(id={}, seq_number={})", id, seq_number),
+            MsgBody::Request { id, seq_number } => write!(f, "(id={}, seq_number={})", id, seq_number),
+            MsgBody::TimeExceeded { unused } => write!(f, "(unused={})", unused),
+            MsgBody::TooBig { mtu } => write!(f, "mtu={}", mtu),
+            MsgBody::Unreachable { unused } => write!(f, "(unused={})", unused),
+            MsgBody::Unknown { bytes } => write!(f, "Unknown Body: (bytes={:02X?})", bytes)
         }
     }
 }
@@ -1707,8 +1772,8 @@ impl fmt::Display for IcmpHeader {
 impl fmt::Display for IcmpV6Header {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f,
-            "{{ IcmpV6Header: *msg_type={} *code={} }}",
-            self.msg_type, self.code
+            "{{ IcmpV6Header: *msg_type={} *code={} *mgs_body={}}}",
+            self.msg_type, self.code, self.msg_body
         )
     }
 }
@@ -2152,14 +2217,19 @@ impl IcmpV6Header {
             return Err("Packet is too small to have a ICMPv6 header!");
         }
 
-        let msg_type = IcmpV6Type::from(raw[0]);
+        let msg_type = MsgType::from(raw[0]);
         let code = raw[1];
         let checksum = u16::from_be_bytes([raw[2], raw[3]]);
+
+        let mut body_bytes: [u8; 4] = [0, 0, 0, 0];
+        body_bytes.copy_from_slice(&raw[4..8]);
+        let msg_body = MsgBody::parse(msg_type, &body_bytes);
 
         Ok( Self {
             msg_type,
             code,
-            checksum
+            checksum,
+            msg_body
         })
     }
 
@@ -2168,7 +2238,7 @@ impl IcmpV6Header {
         h_b.extend_from_slice(&[self.msg_type.serialize()]);
         h_b.extend_from_slice(&[self.code]);
         h_b.extend_from_slice(&self.checksum.to_be_bytes());
-
+        h_b.extend_from_slice(&self.msg_body.serialize());
         h_b
     }
 }
@@ -2310,21 +2380,105 @@ impl TcpFlags {
     }
 }
 
-impl IcmpV6Type {
+impl MsgType {
     pub fn serialize(&self) -> u8 {
         match self {
-            IcmpV6Type::Unreachable => 0x01,
-            IcmpV6Type::TooBig => 0x02,
-            IcmpV6Type::TimeExceeded => 0x03,
-            IcmpV6Type::ParamProblem => 0x04,
-            IcmpV6Type::Request => 0x80,
-            IcmpV6Type::Reply => 0x81,
-            IcmpV6Type::RS => 0x85,
-            IcmpV6Type::RA => 0x86,
-            IcmpV6Type::NS => 0x87,
-            IcmpV6Type::NA => 0x88,
-            IcmpV6Type::Unknown(value) => *value
+            MsgType::Unreachable => 0x01,
+            MsgType::TooBig => 0x02,
+            MsgType::TimeExceeded => 0x03,
+            MsgType::ParamProblem => 0x04,
+            MsgType::Request => 0x80,
+            MsgType::Reply => 0x81,
+            MsgType::RS => 0x85,
+            MsgType::RA => 0x86,
+            MsgType::NS => 0x87,
+            MsgType::NA => 0x88,
+            MsgType::Unknown(value) => *value
         }
+    }
+}
+
+impl MsgBody {
+    pub fn parse(msg_type: MsgType, bytes: &[u8; 4]) -> Self {
+        match msg_type {
+            MsgType::Unreachable => {
+                MsgBody::Unreachable { unused: 0 as u32 }
+            },
+            MsgType::TooBig => {
+                MsgBody::TooBig { mtu: u32::from_be_bytes(*bytes) }
+            },
+            MsgType::TimeExceeded => {
+                MsgBody::TimeExceeded { unused: 0 as u32 }
+            },
+            MsgType::ParamProblem => {
+                MsgBody::ParamProblem { pointer: u32::from_be_bytes(*bytes) }
+            },
+            MsgType::Request => {
+                MsgBody::Request { id: u16::from_be_bytes([bytes[0], bytes[1]]), seq_number: u16::from_be_bytes([bytes[2], bytes[3]]) }
+            },
+            MsgType::Reply => {
+                MsgBody::Reply { id: u16::from_be_bytes([bytes[0], bytes[1]]), seq_number: u16::from_be_bytes([bytes[2], bytes[3]]) }
+            },
+            MsgType::RS => {
+                MsgBody::RS { reserved: 0 as u32 }
+            },
+            MsgType::RA => {
+                MsgBody::RA { mo: bytes[0], r_lifetime: u16::from_be_bytes([bytes[1], bytes[2]]), hop_limit: bytes[3] }
+            },
+            MsgType::NS => {
+                MsgBody::NS { reserved: 0 as u32 }
+            },
+            MsgType::NA => {
+                MsgBody::NA { rso: u32::from_be_bytes(*bytes) }
+            },
+            MsgType::Unknown(_) => {
+                MsgBody::Unknown { bytes: *bytes }
+            }
+        }
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut h_b: Vec<u8> = Vec::with_capacity(4);
+        match self {
+            MsgBody::NA { rso }  => {
+                h_b.extend_from_slice(&rso.to_be_bytes());
+            },
+            MsgBody::NS { reserved } => {
+                h_b.extend_from_slice(&reserved.to_be_bytes());
+            },
+            MsgBody::RS { reserved } => {
+                h_b.extend_from_slice(&reserved.to_be_bytes());
+            },
+            MsgBody::RA { mo, r_lifetime, hop_limit } => {
+                h_b[0] = *mo;
+                h_b.extend_from_slice(&r_lifetime.to_be_bytes());
+                h_b[3] = *hop_limit;
+            },
+            MsgBody::Reply { id, seq_number } => {
+                h_b.extend_from_slice(&id.to_be_bytes());
+                h_b.extend_from_slice(&seq_number.to_be_bytes());
+            },
+            MsgBody::Request { id, seq_number } => {
+                h_b.extend_from_slice(&id.to_be_bytes());
+                h_b.extend_from_slice(&seq_number.to_be_bytes());
+            },
+            MsgBody::Unreachable { unused } => {
+                h_b.extend_from_slice(&unused.to_be_bytes());
+            },
+            MsgBody::TooBig { mtu } => {
+                h_b.extend_from_slice(&mtu.to_be_bytes());
+            },
+            MsgBody::ParamProblem { pointer } => {
+                h_b.extend_from_slice(&pointer.to_be_bytes());
+            },
+            MsgBody::TimeExceeded { unused } => {
+                h_b.extend_from_slice(&unused.to_be_bytes());
+            },
+            MsgBody::Unknown { bytes } => {
+                h_b.extend_from_slice(bytes);
+            },
+        }
+        h_b
     }
 }
 
@@ -2425,5 +2579,7 @@ pub fn calculate_l4_checksum_v6(src_ip: &Ipv6Addr, dst_ip: &Ipv6Addr, next_heade
 
     checksum
 }
+
+// Fazer os 2bytes reserved variando conforme msg type.
 
 // <!-------------------------------------------------------------------------------------------------------->
