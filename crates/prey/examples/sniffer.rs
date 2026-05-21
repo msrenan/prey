@@ -309,6 +309,8 @@ fn main() {
                                             conn.write_buffer.advance(response.data().len());
                                             println!("Sending UDP reply!");
                                             conn.send().unwrap();
+                                            conn.read_buffer.clear();
+                                            continue;
                                         },
                                         Err(e) => {
                                             println!("An error have ocurred: {}", e);
@@ -317,9 +319,25 @@ fn main() {
                                         }
                                     };
                                 }
+
                                 let response_data = b"This is your UDP response!";
 
-                                
+                                match packet.build_udp_response(response.as_mut_slice(), response_data) {
+                                    Ok(n) => {
+                                        println!("{} bytes written!", n);
+                                        response.advance(n);
+                                        let writable = conn.write_buffer.as_mut_slice();
+                                        writable[..response.data().len()].copy_from_slice(&response.data());
+                                        conn.write_buffer.advance(response.data().len());
+                                        println!("Sending UDP reply!");
+                                        conn.send().unwrap();
+                                    },
+                                    Err(e) => {
+                                        println!("An error have ocurred: {}", e);
+                                        conn.read_buffer.clear();
+                                        continue;
+                                    }
+                                };
 
 
                                 
@@ -392,12 +410,33 @@ fn main() {
                                     space[..response.data().len()].copy_from_slice(&response.data());
                                     conn.write_buffer.advance(response.data().len());
                                     conn.send().unwrap();
+                                    conn.read_buffer.clear();
+                                    continue;
                                 },
                                 Err(e) => {
                                     println!("Error while sending NDP-NA reply: {}", e);
                                     conn.read_buffer.clear();
                                     continue;
                                 }
+                            }
+                        }
+
+                        let mut response = pool.acquire().unwrap();
+                        let data = b"This is your UDP response!";
+                        match packet.build_udp_response(response.as_mut_slice(), data) {
+                            Ok(n) => {
+                                response.advance(n);
+                                let space = conn.write_buffer.as_mut_slice();
+                                space[..response.data().len()].copy_from_slice(&response.data());
+                                conn.write_buffer.advance(response.data().len());
+                                conn.send().unwrap();
+                                conn.read_buffer.clear();
+                                continue;
+                            },
+                            Err(e) => {
+                                println!("Error while sending NDP-NA reply: {}", e);
+                                conn.read_buffer.clear();
+                                continue;
                             }
                         }
                     } else if let L4::TCP(tcp) = l4 {

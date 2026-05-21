@@ -411,7 +411,7 @@ impl<'a> Packet<'a> {
                             ndp_body.extend_from_slice(&payload[4..]);
                             
 
-                            r_icmpv6.checksum = calculate_l4_checksum_v6(&ipv6.dst_ip, &ipv6.src_ip, IpProtocol::ICMPv6, &ndp_body);
+                            r_icmpv6.checksum = calculate_l4_checksum_v6(&r_ipv6.src_ip, &r_ipv6.dst_ip, IpProtocol::ICMPv6, &ndp_body);
 
                             packet.extend_from_slice(&r_icmpv6.serialize());
                             packet.extend_from_slice(&ndp_body[8..]);
@@ -585,8 +585,8 @@ impl<'a> Packet<'a> {
 
                     body.extend_from_slice(&ipv6.serialize());
                     body.extend_from_slice(&udp.serialize());
-                    r_icmp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, 
-                        &ipv6.dst_ip, r_ipv6.next_header, &body);
+                    r_icmp.checksum = calculate_l4_checksum_v6(&r_ipv6.src_ip, 
+                        &r_ipv6.dst_ip, r_ipv6.next_header, &body);
 
                     packet.extend_from_slice(&r_icmp.serialize());
                     packet.extend_from_slice(&body[8..]);
@@ -725,7 +725,7 @@ impl<'a> Packet<'a> {
                     body.extend_from_slice(&r_tcp.serialize());
                     body.extend_from_slice(&payload);
 
-                    r_tcp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, &ipv6.dst_ip, 
+                    r_tcp.checksum = calculate_l4_checksum_v6(&r_ipv6.src_ip, &r_ipv6.dst_ip, 
                         r_ipv6.next_header, &body);
 
                     packet.extend_from_slice(&r_tcp.serialize());
@@ -864,7 +864,7 @@ impl<'a> Packet<'a> {
                     let mut body: Vec<u8> = Vec::with_capacity(r_tcp.data_offset as usize + payload.len());
                     body.extend_from_slice(&r_tcp.serialize());
 
-                    r_tcp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, &ipv6.dst_ip, 
+                    r_tcp.checksum = calculate_l4_checksum_v6(&r_ipv6.src_ip, &r_ipv6.dst_ip, 
                         r_ipv6.next_header, &body);
 
                     packet.extend_from_slice(&r_tcp.serialize());
@@ -1003,7 +1003,7 @@ impl<'a> Packet<'a> {
                     let mut body: Vec<u8> = Vec::with_capacity(r_tcp.data_offset as usize + payload.len());
                     body.extend_from_slice(&r_tcp.serialize());
 
-                    r_tcp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, &ipv6.dst_ip, 
+                    r_tcp.checksum = calculate_l4_checksum_v6(&r_ipv6.src_ip, &r_ipv6.dst_ip, 
                         r_ipv6.next_header, &body);
 
                     packet.extend_from_slice(&r_tcp.serialize());
@@ -1145,7 +1145,7 @@ impl<'a> Packet<'a> {
                     body.extend_from_slice(&r_tcp.serialize());
                     body.extend_from_slice(&response);
 
-                    r_tcp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, &ipv6.dst_ip, 
+                    r_tcp.checksum = calculate_l4_checksum_v6(&r_ipv6.src_ip, &r_ipv6.dst_ip, 
                         r_ipv6.next_header, &body);
 
                     packet.extend_from_slice(&r_tcp.serialize());
@@ -1291,7 +1291,7 @@ impl<'a> Packet<'a> {
                     let mut body: Vec<u8> = Vec::with_capacity(r_tcp.data_offset as usize + payload.len());
                     body.extend_from_slice(&r_tcp.serialize());
 
-                    r_tcp.checksum = calculate_l4_checksum_v6(&ipv6.src_ip, &ipv6.dst_ip, 
+                    r_tcp.checksum = calculate_l4_checksum_v6(&r_ipv6.src_ip, &r_ipv6.dst_ip, 
                         r_ipv6.next_header, &body);
 
                     packet.extend_from_slice(&r_tcp.serialize());
@@ -1375,8 +1375,52 @@ impl<'a> Packet<'a> {
                     Err("You can't build a UDP reply from a non-UDP packet.")
                 }
             },
-            L3::IPv6(ipv6, protocol) => {
-                Err("Not finished.")
+            L3::IPv6(ipv6, _) => {
+                if let L4::UDP(udp) = l4 {
+
+                let r_eth = EthernetHeader {
+                    dst_mac: eth.src_mac,
+                    src_mac: eth.dst_mac,
+                    ether_type: eth.ether_type
+                };
+
+                packet.extend_from_slice(&r_eth.serialize());
+
+                let r_ipv6 = IPv6Header {
+                    class: ipv6.class,
+                    version: 6,
+                    flow: ipv6.flow,
+                    payload_length: 8 + response.len() as u16,
+                    next_header: IpProtocol::UDP,
+                    hop_limit: 64,
+                    src_ip: ipv6.dst_ip,
+                    dst_ip: ipv6.src_ip
+                };
+
+                packet.extend_from_slice(&r_ipv6.serialize());
+
+                let mut r_udp = UdpHeader {
+                    checksum: 0x0000,
+                    dst_port: udp.src_port,
+                    src_port: udp.dst_port,
+                    length: 8 + response.len() as u16,
+                };
+
+                let mut body: Vec<u8> = Vec::new();
+
+                body.extend_from_slice(&r_udp.serialize());
+                body.extend_from_slice(&response);
+
+                r_udp.checksum = calculate_l4_checksum_v6(&r_ipv6.src_ip, &r_ipv6.dst_ip, r_ipv6.next_header, &body);
+
+                packet.extend_from_slice(&r_udp.serialize());
+                packet.extend_from_slice(&response);
+
+                buf[..packet.len()].copy_from_slice(&packet);
+                Ok(packet.len())
+            } else {
+                Err("You can't build a UDP reply from a non-UDP packet.")
+            }
             },
             _ => Err("You can't build a UDP reply from a non-UDP packet, and UDP only exists for IPv4/6 Ethernet Types.")
         }
@@ -1437,7 +1481,7 @@ impl<'a> Packet<'a> {
                 ndp_body.extend_from_slice(&[0x01]);
                 ndp_body.extend_from_slice(&mac);
 
-                r_icmpv6.checksum = calculate_l4_checksum_v6(&ip, &ipv6.src_ip, IpProtocol::ICMPv6, &ndp_body);
+                r_icmpv6.checksum = calculate_l4_checksum_v6(&ip, &r_ipv6.dst_ip, IpProtocol::ICMPv6, &ndp_body);
 
                 packet.extend_from_slice(&r_icmpv6.serialize());
                 packet.extend_from_slice(&ndp_body[8..]);
