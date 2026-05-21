@@ -1,4 +1,5 @@
-use std::{io::ErrorKind, net::{Ipv4Addr, SocketAddr, SocketAddrV4}};
+use core::fmt;
+use std::{collections::HashMap, io::ErrorKind, net::{Ipv4Addr, SocketAddr, SocketAddrV4}};
 use prey::{buffer::BufferPool, network::{Connection, RawSocket}, packet::{ArpOperation, EtherType, IpProtocol, L3, L4, Packet, TcpFlags}};
 
 const MY_IPV4: Ipv4Addr = Ipv4Addr::new(188, 20, 57, 2);
@@ -9,6 +10,25 @@ macro_rules! log {
     ($($arg:tt)*) => {
         println!("[PREY] :: {}", format_args!($($arg)*));
     };
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+struct Client {
+    mac: [u8; 6],
+    ip: Ipv4Addr,
+    port: u16,
+    http: bool
+}
+
+impl fmt::Display for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mac = format!("{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                            self.mac[0], self.mac[1], self.mac[2], self.mac[3], self.mac[4], self.mac[5]);
+        write!(f,
+            "Client@{} => [ *mac={} *addr={}:{} ]",
+            self.ip, mac, self.ip, self.port
+        )
+    }
 }
 
 fn main() {
@@ -26,6 +46,7 @@ fn main() {
 
     let mut await_fin_confirmation = false;
     let mut remainders: Vec<String> = Vec::new();
+    let mut active_clients: HashMap<u16, Client> = HashMap::new();
 
     loop {
         match conn.receive() {
@@ -38,16 +59,19 @@ fn main() {
             Ok(n) => {
                 println!("\n-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n");
                 log!("{} bytes received!", n);
-                let packet = Packet::new(&conn.read_buffer.data());
 
-                let (eth, l3, l4) = match packet.headers() {
-                    Ok(h) => h,
-                    Err(e) => {
-                        log!("Error while extracting headers: {}", e);
-                        conn.read_buffer.clear();
-                        continue;
+                let (eth, l3, l4) = {
+                    let packet = Packet::new(conn.read_buffer.data());
+                    match packet.headers() {
+                        Ok(h) => h,
+                        Err(e) => {
+                            log!("Error while extracting headers: {}", e);
+                            conn.read_buffer.clear();
+                            continue;
+                        }
                     }
                 };
+                
 
                 if eth.dst_mac != MY_MAC && eth.dst_mac != BROAD_MAC {
                     log!("Packet ignored.");
@@ -72,7 +96,7 @@ fn main() {
                                 log!("Crafting ARP reply!");
 
                                 let mut reply = pool.acquire().unwrap();
-
+                                let packet = Packet::new(conn.read_buffer.data());
                                 match packet.build_arp_reply(reply.as_mut_slice()) {
                                     Ok(n) => {
                                         reply.advance(n);
@@ -131,6 +155,7 @@ fn main() {
                                 
                                 if flags == [TcpFlags::SYN] {
                                     log!("Crafting SYN-ACK.");
+                                    let packet = Packet::new(conn.read_buffer.data());
                                     match packet.build_tcp_syn_ack(conn.write_buffer.as_mut_slice()) {
                                         Ok(n) => {
                                             conn.write_buffer.advance(n);
@@ -148,15 +173,34 @@ fn main() {
                                 } else if flags == [TcpFlags::ACK] {
                                     log!("ACK received!");
                                     if await_fin_confirmation {
-                                        log!("Connection ended.");
                                         await_fin_confirmation = false;
+                                        log!("Connection ended with Client@{}", ipv4.src_ip);
+                                        if active_clients.contains_key(&tcp.src_port) {
+                                            active_clients.remove(&tcp.src_port);
+                                            log!("Client removed from active_clients list.");
+                                        }
+                                        
                                     } else {
-                                        log!("Connection established.");
+                                        let new = Client {
+                                            mac: eth.src_mac,
+                                            ip: ipv4.src_ip,
+                                            port: tcp.src_port,
+                                            http: false
+                                        };
+                                        
+                                        if !active_clients.contains_key(&new.port) {
+                                            log!("Connection established: Client@{}.", new.ip);
+                                            log!("Adding Client to active_clients list.");
+                                            active_clients.insert(new.port, new);
+                                        } else {
+                                            log!("Received confirmation from Client@{}", active_clients[&new.port].ip);
+                                        }
                                     }
                                     conn.read_buffer.clear();
                                     continue;
                                 } else if flags == [TcpFlags::FIN, TcpFlags::ACK] {
                                     log!("Crafting FIN-ACK.");
+                                    let packet = Packet::new(conn.read_buffer.data());
                                     match packet.build_tcp_fin_ack(conn.write_buffer.as_mut_slice()) {
                                         Ok(n) => {
                                             conn.write_buffer.advance(n);
@@ -174,18 +218,21 @@ fn main() {
                                     }
                                 } else if flags == [TcpFlags::PSH, TcpFlags::ACK] {
                                     log!("Request received! Start processing!");
-                                    let payload = match packet.payload() {
-                                        Ok(p) => p,
-                                        Err(e) => {
-                                            log!("Error while extracting paylaod: {}", e);
-                                            conn.read_buffer.clear();
-                                            continue;
+                                    let payload = {
+                                        let packet = Packet::new(conn.read_buffer.data());
+                                        match packet.payload() {
+                                            Ok(p) => p,
+                                            Err(e) => {
+                                                log!("Error while extracting paylaod: {}", e);
+                                                conn.read_buffer.clear();
+                                                continue;
+                                            }
                                         }
                                     };
                                     let request = String::from_utf8_lossy(&payload);
                                     if request.contains("HTTP") {
                                         log!("It's a HTTP request!");
-
+                                        
                                         let line = request.lines().next().unwrap();
                                         let mut line_parts = line.split_whitespace();
                                         let verb = line_parts.next().unwrap();
@@ -194,6 +241,7 @@ fn main() {
                                         if verb != "GET" {
                                             log!("Crafting reject!");
                                             let conf_msg = format!("You can only send GET requests to this server.");
+                                            let packet = Packet::new(conn.read_buffer.data());
                                             match packet.build_tcp_response(conn.write_buffer.as_mut_slice(), 
                                             conf_msg.as_bytes()) {
                                                 Ok(n) => {
@@ -213,6 +261,7 @@ fn main() {
 
                                         if uri == "/" {
                                             log!("Crafting response!");
+                                            let body_content: String = remainders.iter().map(|t| { format!("<li>{}</li>\n", t)}).collect();
                                             let body = format!(
                                                 "<html>
                                                     <head>
@@ -221,12 +270,12 @@ fn main() {
                                                     <body>
                                                         <h1> REMAINDERS </h1>
                                                         <ol>
-                                                            {:?}    
+                                                            {}    
                                                         </ol>
                                                     </body>
                                                 
                                                 <html/>",
-                                                remainders
+                                                body_content
                                             );
                                             let response = format!(
                                                 "HTTP/1.1 200 OK\r\n\
@@ -237,7 +286,7 @@ fn main() {
                                                 body.len(),
                                                 body
                                             );
-
+                                            let packet = Packet::new(conn.read_buffer.data());
                                             match packet.build_tcp_response(conn.write_buffer.as_mut_slice(), 
                                             response.as_bytes()) {
                                                 Ok(n) => {
@@ -256,6 +305,7 @@ fn main() {
                                         } else if uri == "/favicon.ico" {
                                             log!("Crafting /favicon reply!");
                                             let response = format!("HTTP/1.1 404 NOT FOUND\r\n\r\n");
+                                            let packet = Packet::new(conn.read_buffer.data());
                                             match packet.build_tcp_response(conn.write_buffer.as_mut_slice(), 
                                             response.as_bytes()) {
                                                 Ok(n) => {
@@ -277,13 +327,85 @@ fn main() {
                                     } else if request.contains("REMAINDER") {
                                         log!("It's a REMAINDER request!");
                                         let content = request.split_once(" ").unwrap().1.replace("\n", "");
+                                        if content == "LIST" {
+                                            log!("Crafting list reply!");
+                                            let list: String = remainders.iter().enumerate().map(|(n, i)| {
+                                                format!("\t{}. {}\n", n, i)
+                                            }).collect();
+                                            let conf_msg = format!("REMAINDER LIST:\n{}", 
+                                                list
+                                            );
+                                            let packet = Packet::new(conn.read_buffer.data());
+                                            match packet.build_tcp_response(conn.write_buffer.as_mut_slice(), 
+                                            conf_msg.as_bytes()) {
+                                                Ok(n) => {
+                                                    conn.write_buffer.advance(n);
+                                                    let sent = conn.send().unwrap();
+                                                    log!("Sent {} bytes!", sent);
+                                                    conn.read_buffer.clear();
+                                                    continue;
+                                                },
+                                                Err(e) => {
+                                                    log!("Error while crafting confirmation: {}", e);
+                                                    conn.read_buffer.clear();
+                                                    continue;
+                                                }
+                                            }
+                                        } else if content == "CONNECTIONS" {
+                                            log!("Crafting connections reply!");
+                                            let clients: String = active_clients.iter().map(|(_, v)| {
+                                                format!("\t{}\n", v)
+                                            }).collect();
+                                            let conf_msg = format!("REMAINDER CONNs:\n{}", 
+                                                clients
+                                            );
+                                            let packet = Packet::new(conn.read_buffer.data());
+                                            match packet.build_tcp_response(conn.write_buffer.as_mut_slice(), 
+                                            conf_msg.as_bytes()) {
+                                                Ok(n) => {
+                                                    conn.write_buffer.advance(n);
+                                                    let sent = conn.send().unwrap();
+                                                    log!("Sent {} bytes!", sent);
+                                                    conn.read_buffer.clear();
+                                                    continue;
+                                                },
+                                                Err(e) => {
+                                                    log!("Error while crafting confirmation: {}", e);
+                                                    conn.read_buffer.clear();
+                                                    continue;
+                                                }
+                                            }
+                                        }
+
                                         log!("Adding {} to the remainder list!", content);
-                                        let tmp = format!("<li>{}</li>\n", content);
-                                        remainders.push(tmp);
+                                        remainders.push(content.to_string());
 
                                         log!("Crafting confirmation!");
                                         let conf_msg = format!("ADDED {} TO REMAINDER LIST SUCCESSFULLY!\n", content);
+                                        {
+                                            let packet = Packet::new(conn.read_buffer.data());
+                                            match packet.build_tcp_response(conn.write_buffer.as_mut_slice(), 
+                                            conf_msg.as_bytes()) {
+                                                Ok(n) => {
+                                                    conn.write_buffer.advance(n);
+                                                    let sent = conn.send().unwrap();
+                                                    log!("Sent {} bytes!", sent);
+                                                    //conn.read_buffer.clear();
+                                                    //continue;
+                                                },
+                                                Err(e) => {
+                                                    log!("Error while crafting confirmation: {}", e);
+                                                    conn.read_buffer.clear();
+                                                    continue;
+                                                }
+                                            }
+                                        }
 
+                                        log!("Crafting response!");                                      
+                                    } else {
+                                        log!("Crafting error reply!");
+                                        let conf_msg = format!("PLEASE ENTER A VALID COMMAND!\n");
+                                        let packet = Packet::new(conn.read_buffer.data());
                                         match packet.build_tcp_response(conn.write_buffer.as_mut_slice(), 
                                         conf_msg.as_bytes()) {
                                             Ok(n) => {
