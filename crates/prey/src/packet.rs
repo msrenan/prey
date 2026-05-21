@@ -166,7 +166,7 @@ impl<'a> Packet<'a> {
                         if calculate_l4_checksum_v6(&src_ip, &dst_ip, next_header, &raw) != 0x0000 {
                             return Err("Invalid Packet: ICMPv6 Checksum Error.");
                         }
-                        Ok((L4::ICMPv6(icmp), 4))
+                        Ok((L4::ICMPv6(icmp), 8))
                     },
                     IpProtocol::TCP => {
                         let tcp = TcpHeader::parse(raw).unwrap();
@@ -203,9 +203,26 @@ impl<'a> Packet<'a> {
     /// A `Result<(EthernetHeader, L3, L4), &'static str>` containing either a tuple with the
     /// Ethernet Header object, the L3 and L4 enums of the packet, or a static error message.
     pub fn headers(&self) -> Result<(EthernetHeader, L3, L4), &'static str> {
-        let eth = self.ethernet_header()?.0;
-        let l3 = self.l3_header()?.0;
-        let l4 = self.l4_header()?.0;
+        let eth = match self.ethernet_header() {
+            Ok(data) => {
+                data.0
+            },
+            Err(e) => { return Err(e); }
+        };
+        let l3 = match self.l3_header() {
+            Ok(data) => {
+                data.0
+            },
+            Err(e) => { return Err(e); }
+        };
+        let l4 = match self.l4_header() {
+            Ok(data) => data.0,
+            Err(e) if eth.ether_type == EtherType::ARP => {
+                println!("[PREY] :: {} Setting L4 to Raw Bytes.", e);
+                L4::Raw
+            },
+            Err(e) => { return Err(e); }
+        };
 
         Ok((eth, l3, l4))
     }
