@@ -26,9 +26,10 @@ To provide a modular and memory-safe infrastructure for:
 
 - ### Packet Module
   - Packet structure
-    - Packet parsing and mapping
-    - Checksum math
-
+    - Packet processing
+    - Checksum validation
+    - Packet replying
+    > Done for both IPv4 and IPv6!
 
 Created by **Renan Machado Santos**. Built for performance.
 
