@@ -132,6 +132,13 @@ impl RawSocket {
     /// # fn new
     /// Function that creates a new RawSocket, interacting directly with the Linux Kernel.
     ///
+    /// # Params
+    /// - interface: `&str` - The interface name which will be used by the RawSocket.
+    /// - sub_networkv4: `String` - A IPv4 sub-network ("199.215.25.1/24") where the RawSocket will 
+    /// listen for IPv4 packets.
+    /// - sub_networkv6: `String` - A IPv6 sub-network ("2000:ab2::1/64") where the Raw Socket will
+    /// listen for IPv6 packets. 
+    /// 
     /// # Returns
     /// A `Result` containing the RawSocket object.
     pub fn new(interface: &str, sub_networkv4: String, sub_networkv6: String) -> io::Result<Self> {

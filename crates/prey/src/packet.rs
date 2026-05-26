@@ -313,6 +313,16 @@ impl<'a> Packet<'a> {
         Ok(packet.len())
     }
 
+    /// # fn build_icmp_reply
+    /// Function that builds a ICMP Echo Reply from a received ICMP Echo Request packet.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated buffer.
+    /// - buf: `&mut [u8]` - A mutable reference to buffer's writable slice of bytes.
+    /// 
+    /// # Returns 
+    /// A `Result<usize, &'static str>` containing either the amount of bytes written or a
+    /// static error message.
     pub fn build_icmp_reply(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
         let mut packet: Vec<u8> = Vec::new();
 
@@ -446,6 +456,16 @@ impl<'a> Packet<'a> {
         Ok(packet.len())
     }
 
+    /// # fn build_icmp_reject
+    /// Function that builds a ICMP Destination Unreachable packet
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated buffer.
+    /// - buf: `&mut [u8]` - A mutable reference to buffer's writable slice of bytes.
+    /// 
+    /// # Returns 
+    /// A `Result<usize, &'static str>` containing either the amount of bytes written or a
+    /// static error message.
     pub fn build_icmp_reject(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
         let mut packet: Vec<u8> = Vec::new();
 
@@ -618,6 +638,16 @@ impl<'a> Packet<'a> {
         
     }
 
+    /// # fn build_tcp_syn_ack
+    /// Function that builds a TCP SYN-ACK for the three-way handshake.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated buffer.
+    /// - buf: `&mut [u8]` - A mutable reference to buffer's writable slice of bytes.
+    /// 
+    /// # Returns 
+    /// A `Result<usize, &'static str>` containing either the amount of bytes written or a
+    /// static error message.
     pub fn build_tcp_syn_ack(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
         let mut packet: Vec<u8> = Vec::new();
 
@@ -687,7 +717,7 @@ impl<'a> Packet<'a> {
                         l4_payload.extend_from_slice(&r_tcp.serialize());
                         l4_payload.extend_from_slice(payload);
 
-                        r_tcp.checksum = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip,
+                        r_tcp.checksum = calculate_tcp_udp_checksum(&ipv4.src_ip, &ipv4.dst_ip,
                             protocol, &l4_payload);
 
                         packet.extend_from_slice(&r_tcp.serialize());
@@ -759,6 +789,16 @@ impl<'a> Packet<'a> {
 
     }
 
+    /// # fn build_tcp_ack
+    /// Function that builds a TCP ACK packet with no payload.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated buffer.
+    /// - buf: `&mut [u8]` - A mutable reference to buffer's writable slice of bytes.
+    /// 
+    /// # Returns 
+    /// A `Result<usize, &'static str>` containing either the amount of bytes written or a
+    /// static error message.
     pub fn build_tcp_ack(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
         let mut packet: Vec<u8> = Vec::new();
 
@@ -827,7 +867,7 @@ impl<'a> Packet<'a> {
                         l4_payload.extend_from_slice(&r_tcp.serialize());
                         l4_payload.extend_from_slice(payload);
 
-                        r_tcp.checksum = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip,
+                        r_tcp.checksum = calculate_tcp_udp_checksum(&ipv4.src_ip, &ipv4.dst_ip,
                             protocol, &l4_payload);
 
                         packet.extend_from_slice(&r_tcp.serialize());
@@ -897,6 +937,16 @@ impl<'a> Packet<'a> {
 
     }
 
+    /// # fn build_tcp_fin_ack
+    /// Function that builds a TCP FIN-ACK packet to end connection.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated buffer.
+    /// - buf: `&mut [u8]` - A mutable reference to buffer's writable slice of bytes.
+    /// 
+    /// # Returns 
+    /// A `Result<usize, &'static str>` containing either the amount of bytes written or a
+    /// static error message.
     pub fn build_tcp_fin_ack(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
         let mut packet: Vec<u8> = Vec::new();
 
@@ -966,7 +1016,7 @@ impl<'a> Packet<'a> {
                         l4_payload.extend_from_slice(&r_tcp.serialize());
                         l4_payload.extend_from_slice(payload);
 
-                        r_tcp.checksum = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip,
+                        r_tcp.checksum = calculate_tcp_udp_checksum(&ipv4.src_ip, &ipv4.dst_ip,
                             protocol, &l4_payload);
 
                         packet.extend_from_slice(&r_tcp.serialize());
@@ -1037,6 +1087,17 @@ impl<'a> Packet<'a> {
 
     }
 
+    /// # fn build_tcp_response
+    /// Function that builds a TCP response for a TCP request.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated buffer.
+    /// - buf: `&mut [u8]` - A mutable reference to buffer's writable slice of bytes.
+    /// - response: `&[u8]` - A reference to the payload of the response in bytes.
+    /// 
+    /// # Returns 
+    /// A `Result<usize, &'static str>` containing either the amount of bytes written or a
+    /// static error message.
     pub fn build_tcp_response(&self, buf: &mut [u8], response: &[u8]) -> Result<usize, &'static str> {
         let mut packet: Vec<u8> = Vec::new();
 
@@ -1106,7 +1167,7 @@ impl<'a> Packet<'a> {
                         l4_payload.extend_from_slice(&r_tcp.serialize());
                         l4_payload.extend_from_slice(&response);
 
-                        r_tcp.checksum = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip,
+                        r_tcp.checksum = calculate_tcp_udp_checksum(&ipv4.src_ip, &ipv4.dst_ip,
                             protocol, &l4_payload);
 
                         packet.extend_from_slice(&r_tcp.serialize());
@@ -1179,6 +1240,16 @@ impl<'a> Packet<'a> {
 
     }
 
+    /// # fn build_tcp_rst
+    /// Function that builds a TCP RST packet, forcing the end of the connection.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated buffer.
+    /// - buf: `&mut [u8]` - A mutable reference to buffer's writable slice of bytes.
+    /// 
+    /// # Returns 
+    /// A `Result<usize, &'static str>` containing either the amount of bytes written or a
+    /// static error message.
     pub fn build_tcp_rst(&self, buf: &mut [u8]) -> Result<usize, &'static str> {
         let mut packet: Vec<u8> = Vec::new();
 
@@ -1254,7 +1325,7 @@ impl<'a> Packet<'a> {
 
                         l4_payload.extend_from_slice(&r_tcp.serialize());
 
-                        r_tcp.checksum = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip,
+                        r_tcp.checksum = calculate_tcp_udp_checksum(&ipv4.src_ip, &ipv4.dst_ip,
                             protocol, &l4_payload);
 
                         packet.extend_from_slice(&r_tcp.serialize());
@@ -1324,6 +1395,17 @@ impl<'a> Packet<'a> {
         }
     }
 
+    /// # fn build_udp_response
+    /// Function that builds a UDP packet with a response payload.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated buffer.
+    /// - buf: `&mut [u8]` - A mutable reference to buffer's writable slice of bytes.
+    /// - response: `&[u8]` - A reference to the payload of the response in bytes.
+    /// 
+    /// # Returns 
+    /// A `Result<usize, &'static str>` containing either the amount of bytes written or a
+    /// static error message.
     pub fn build_udp_response(&self, buf: &mut [u8], response: &[u8]) -> Result<usize, &'static str> {
         let mut packet: Vec<u8> = Vec::new();
 
@@ -1443,6 +1525,19 @@ impl<'a> Packet<'a> {
         }
     }
 
+    /// # fn build_ndp_na
+    /// Function that builds a NDP (ICMPv6) Network Advertisement packet. *Works similar to an
+    /// ARP reply.*
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated buffer.
+    /// - buf: `&mut [u8]` - A mutable reference to buffer's writable slice of bytes.
+    /// - ip: `Ipv6Addr` - The IP of PREY instance.
+    /// - mac: `[u8; 6]` - The MAC address of PREY instance.
+    /// 
+    /// # Returns 
+    /// A `Result<usize, &'static str>` containing either the amount of bytes written or a
+    /// static error message.
     pub fn build_ndp_na(&self, buf: &mut [u8], ip: Ipv6Addr, mac: [u8; 6]) -> Result<usize, &'static str> {
         let mut packet: Vec<u8> = Vec::with_capacity(72);
 
@@ -1673,6 +1768,15 @@ pub struct IcmpHeader {
     pub seq_number: u16
 }
 
+
+/// # IcmpV6Header
+/// Struct that defines and separates all information of a packet's ICMPv6 Header.
+/// 
+/// # Fields
+/// - msg_type: `MsgType` - Message Type
+/// - code: `u8` - Code
+/// - checksum: `u16` - Checksum value
+/// - msg_body: `MsgBody` - Message Body (may vary depending on Message Type)
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct IcmpV6Header {
     pub msg_type: MsgType,
@@ -1753,6 +1857,14 @@ pub enum L4 {
     Unknown(u8)
 }
 
+/// # IcmpType
+/// Enum that contains all possible ICMP types. 
+///
+/// # Types
+/// - Request - ICMP Echo Request
+/// - Reply - ICMP Echo Reply
+/// - Unreachable - Destination Unreachable
+/// - Unknown(u8) - holds the byte that represents de type of ICMP packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IcmpType {
     Request,
@@ -1782,6 +1894,17 @@ pub enum ArpOperation {
     IReply
 }
 
+/// # TcpFlags
+/// Enum that contains possible TCP flags of a TCP packet.
+/// 
+/// # Types
+/// - SYN
+/// - ACK
+/// - FIN
+/// - RST
+/// - PSH
+/// - URG
+/// - Unknown(u8) - holds the byte that represents the flag value of TCP packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TcpFlags {
     SYN,
@@ -1793,6 +1916,21 @@ pub enum TcpFlags {
     Unknown(u8)
 }
 
+/// # MsgType
+/// Enum that contains possible Message Types for ICMPv6 packets.
+/// 
+/// # Types
+/// - Unreachable - Destination Unreachable
+/// - TooBig - Packet Too Big
+/// - TimeExceeded - Time Exceeded
+/// - ParamProblem - Parameter Problem
+/// - Request - ICMPv6 Echo Request
+/// - Reply - ICMPv6 Echo Reply
+/// - RS - Router Solicitation
+/// - RA - Router Advertisement
+/// - NS - Neighbor Solicitation
+/// - NA - Neighbot Advertisement
+/// - Unknown(u8) - holds the byte that represents the Message Type of ICMPv6 packet.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MsgType {
     Unreachable,
@@ -1808,6 +1946,21 @@ pub enum MsgType {
     Unknown(u8)
 }
 
+/// # MsgBody
+/// Enum that contains ICMPv6 struct fields variations of each Msg Body (depending on each MsgType).
+/// 
+/// # Types
+/// - Unreachable - Destination Unreachable msg_body -> `unused: u32`
+/// - TimeExceeded - Time Exceeded msg_body -> `unused: u32`
+/// - TooBig - Packet Too Big msg_body -> `mtu: u32`
+/// - ParamProblem - Parameter Problem msg_body -> `pointer: u32`
+/// - Request - Echo Request msg_body -> `id: u16`, `seq_number: u16`
+/// - Reply - Echo Reply msg_body -> `id: u16`, `seq_number: u16`
+/// - RS - Router Solicitation msg_body -> `reserved: u32`
+/// - RA - Router Advertisement msg_body -> `mo: u8`, `r_lifetime: u16`, `hop_limit: u8`
+/// - NS - Neighbor Solicitation msg_body -> `reserved: u32`
+/// - NA - Neighbor Advertisement msg_body -> `rso: u32`
+/// - Unknown - Unknown MsgType msg_body -> `bytes: [u8; 4]`
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum MsgBody {
     Unreachable {
@@ -1856,6 +2009,8 @@ pub enum MsgBody {
 //                 1. FROM and fmt::DISPLAY traits ==================================================================
 
 impl From<u8> for TcpFlags {
+    /// # TcpFlags::from
+    /// Converts a `u8` value into a TcpFlag Enum Type.
     fn from(value: u8) -> Self {
         match value {
             0x01 => TcpFlags::FIN,
@@ -1870,6 +2025,8 @@ impl From<u8> for TcpFlags {
 }
 
 impl From<u8> for IpProtocol {
+    /// # IpProtocol::from
+    /// Converts a `u8` value into a IpProtocol Enum Type.
     fn from(value: u8) -> Self {
         match value {
             1 => IpProtocol::ICMP,
@@ -1882,6 +2039,8 @@ impl From<u8> for IpProtocol {
 }
 
 impl From<u16> for EtherType {
+    /// # EtherType::from
+    /// Converts a `u16` value into a EtherType Enum Type.
     fn from(value: u16) -> Self {
         match value {
             0x0800 => EtherType::IPv4,
@@ -1893,6 +2052,8 @@ impl From<u16> for EtherType {
 }
 
 impl From<u16> for ArpOperation {
+    /// # ArpOperation::from
+    /// Converts a `u16` value into a ArpOperation Enum Type.
     fn from(value: u16) -> Self {
         match value {
             0x0001 => ArpOperation::Request,
@@ -1907,6 +2068,8 @@ impl From<u16> for ArpOperation {
 }
 
 impl From<u8> for IcmpType {
+    /// # IcmpType::from
+    /// Converts a `u8` value into a IcmpType Enum Type.
     fn from(value: u8) -> Self {
         match value {
             8 => IcmpType::Request,
@@ -1918,6 +2081,8 @@ impl From<u8> for IcmpType {
 }
 
 impl From<u8> for MsgType {
+    /// # MsgType::from
+    /// Converts a `u8` value into a MsgType Enum Type.
     fn from(value: u8) -> Self {
         match value {
             0x01 => MsgType::Unreachable,
@@ -2340,6 +2505,14 @@ impl IPv4Header {
         })
     }
 
+    /// # fn serialize
+    /// Function that turns a IPv4Header object back into a byte sequence.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated IPv4Header object.
+    /// 
+    /// # Returns
+    /// A `Vec<u8>` containing the IPv4Header object as bytes.
     pub fn serialize(&self) -> Vec<u8> {
         let mut h_b: Vec<u8> = Vec::new();
 
@@ -2401,6 +2574,14 @@ impl IPv6Header {
         })
     }
 
+    /// # fn serialize
+    /// Function that turns a IPv6Header object back into a byte sequence.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated IPv6Header object.
+    /// 
+    /// # Returns
+    /// A `Vec<u8>` containing the IPv6Header object as bytes.
     pub fn serialize(&self) -> Vec<u8> {
         let mut h_b: Vec<u8> = Vec::with_capacity(40);
 
@@ -2446,6 +2627,14 @@ impl IcmpHeader {
         })
     }
 
+    /// # fn serialize
+    /// Function that turns a IcmpHeader object back into a byte sequence.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated IcmpHeader object.
+    /// 
+    /// # Returns
+    /// A `Vec<u8>` containing the IcmpHeader object as bytes.
     pub fn serialize(&self) -> Vec<u8> {
         let mut h_b: Vec<u8> = Vec::with_capacity(8);
 
@@ -2486,6 +2675,14 @@ impl UdpHeader {
         })
     }
 
+    /// # fn serialize
+    /// Function that turns a UdpHeader object back into a byte sequence.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated UdpHeader object.
+    /// 
+    /// # Returns
+    /// A `Vec<u8>` containing the UdpHeader object as bytes.
     pub fn serialize(&self) -> Vec<u8> {
         let mut h_b: Vec<u8> = Vec::with_capacity(8);
         h_b.extend_from_slice(&self.src_port.to_be_bytes());
@@ -2539,6 +2736,14 @@ impl TcpHeader {
         })
     }
 
+    /// # fn serialize
+    /// Function that turns a TcpHeader object back into a byte sequence.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated TcpHeader object.
+    /// 
+    /// # Returns
+    /// A `Vec<u8>` containing the TcpHeader object as bytes.
     pub fn serialize(&self) -> Vec<u8> {
         let mut h_b: Vec<u8> = Vec::new();
         h_b.extend_from_slice(&self.src_port.to_be_bytes());
@@ -2556,6 +2761,15 @@ impl TcpHeader {
 }
 
 impl IcmpV6Header {
+
+    /// # fn parse
+    /// Function that parses a slice of bytes into a IcmpV6Header object.
+    /// 
+    /// # Params
+    /// - raw: `&[u8]` - Reference to the slice of bytes that will be parsed.
+    /// 
+    /// # Returns
+    /// A `Result<Self, &'static str>` containing either the new IcmpV6Header object, or a static error message.
     pub fn parse(raw: &[u8]) -> Result<Self, &'static str> {
         if raw.len() < 4 {
             return Err("Packet is too small to have a ICMPv6 header!");
@@ -2577,6 +2791,14 @@ impl IcmpV6Header {
         })
     }
 
+    /// # fn serialize
+    /// Function that turns a IcmpV6Header object back into a byte sequence.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated IcmpV6Header object.
+    /// 
+    /// # Returns
+    /// A `Vec<u8>` containing the IcmpV6Header object as bytes.
     pub fn serialize(&self) -> Vec<u8> {
         let mut h_b: Vec<u8> = Vec::new();
         h_b.extend_from_slice(&[self.msg_type.serialize()]);
@@ -2651,6 +2873,14 @@ impl ArpOperation {
 }
 
 impl IcmpType {
+    /// # fn serialize
+    /// Function that turns each IcmpType enum types back into its bytes.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated IcmpType enum.
+    /// 
+    /// # Returns
+    /// A `u8` that represents a type of IcmpType enum  as bytes.
     pub fn serialize(tp: IcmpType) -> u8 {
         match tp {
             IcmpType::Reply => 0 as u8,
@@ -2662,6 +2892,14 @@ impl IcmpType {
 }
 
 impl L3 {
+    /// # fn serialize
+    /// Function that turns each L3 enum types back into its bytes.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated L3 enum.
+    /// 
+    /// # Returns
+    /// A `u8` that represents a type of L3 enum  as bytes.
     pub fn serialize(&self) -> Vec<u8> {
         match self {
             L3::ARP(arp) => arp.serialize(),
@@ -2676,6 +2914,14 @@ impl L3 {
 }
 
 impl L4 {
+    /// # fn serialize
+    /// Function that turns each L4 enum types back into its bytes.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated L4 enum.
+    /// 
+    /// # Returns
+    /// A `u8` that represents a type of L4 enum  as bytes.
     pub fn serialize(&self) -> Vec<u8> {
         match self {
             L4::ICMP(icmp) => icmp.serialize(),
@@ -2690,7 +2936,16 @@ impl L4 {
     }
 }
 
+
 impl TcpFlags {
+    /// # fn parse
+    /// Function that converts a `u8` into TcpFlags.
+    /// 
+    /// # Params
+    /// - flags: `u8` - the byte that represents the TCP packet flags.
+    /// 
+    /// # Returns
+    /// A `Vec<TcpFlags>` containing all the flags that TCP packet has.
     pub fn parse(flags: u8) -> Vec<Self> {
         let mut result: Vec<TcpFlags> = Vec::new();
 
@@ -2705,6 +2960,14 @@ impl TcpFlags {
         result
     }
 
+    /// # fn serialize
+    /// Function that turns each TcpFlags enum types back into its bytes.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated TcpFlags enum.
+    /// 
+    /// # Returns
+    /// A `u8` that represents a type of TcpFlags enum  as bytes.
     pub fn serialize(flags_vec: &[TcpFlags]) -> u8 {
         let mut flags: u8 = 0;
         for flag in flags_vec {
@@ -2725,6 +2988,14 @@ impl TcpFlags {
 }
 
 impl MsgType {
+    /// # fn serialize
+    /// Function that turns each MsgType enum types back into its bytes.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated MsgType enum.
+    /// 
+    /// # Returns
+    /// A `u8` that represents a type of MsgType enum  as bytes.
     pub fn serialize(&self) -> u8 {
         match self {
             MsgType::Unreachable => 0x01,
@@ -2743,6 +3014,17 @@ impl MsgType {
 }
 
 impl MsgBody {
+
+    /// # fn parse
+    /// Function that considering the Message Type of a ICMPv6 packet returns its matching Message Body
+    /// fields (each msg_type has different msg_body).
+    /// 
+    /// # Params
+    /// - msg_type: `MsgType` - The Message Type of the ICMPv6 packet.
+    /// - bytes: `&[u8; 4]` - The 4 Message Body bytes.
+    /// 
+    /// # Returns
+    /// A `MsgBody` enum variant that contains the fields (with the actual values) of the message body.
     pub fn parse(msg_type: MsgType, bytes: &[u8; 4]) -> Self {
         match msg_type {
             MsgType::Unreachable => {
@@ -2781,6 +3063,14 @@ impl MsgBody {
         }
     }
 
+    /// # fn serialize
+    /// Function that turns each TcpFlags enum types back into its bytes.
+    /// 
+    /// # Params
+    /// - &self - Reference to the manipulated TcpFlags enum.
+    /// 
+    /// # Returns
+    /// A `u8` that represents a type of TcpFlags enum  as bytes.
     pub fn serialize(&self) -> Vec<u8> {
         let mut h_b: Vec<u8> = Vec::with_capacity(4);
         match self {
@@ -2830,6 +3120,14 @@ impl MsgBody {
 
 // <!---------------------------------------- Aux Functions ------------------------------------------------------->
 
+/// # fn calculate_checksum
+/// Function that calculates checksum in a generic way for raw bytes.
+/// 
+/// # Params
+/// - raw: `&[u8]` - The slice of bytes that will be used in the checksum calculus.
+/// 
+/// # Returns
+/// A `u16` which is the checksum value.
 pub fn calculate_checksum(raw: &[u8]) -> u16 {
     let mut sum: u32 = 0;
     
@@ -2851,20 +3149,38 @@ pub fn calculate_checksum(raw: &[u8]) -> u16 {
     !(sum as u16)
 }
 
+/// # fn calculate_checksum_v4
+/// A wrapper function to calculate IPv4 checksum using the generic **calculate_checksum** function.
+/// 
+/// # Params
+/// - ipv4: `&mut Ipv4Header` - The IPv4Header object that will be used on the checksum calculation.
+/// 
+/// # Returns
+/// A `u16` which is the checksum value.
 pub fn calculate_checksum_v4(ipv4: &mut IPv4Header) -> u16 {
     ipv4.checksum = 0;
     let bytes = ipv4.serialize();
     calculate_checksum(&bytes)
 }
 
+/// # fn calculate_l4_checksum_v4
+/// A wrapper function to calculate L4 checksum for IPv4 using the generic 
+/// **calculate_tcp_udp_checksum** function.
+/// 
+/// # Params
+/// - l3: `L3` - Layer 3 Header that will be used to extract the pseudo-header.
+/// - l4_payload: `&[u8]` - The Layer 4 Header and packet's payload as bytes.
+/// 
+/// # Returns
+/// A `u16` which is the checksum value.
 pub fn calculate_l4_checksum_v4(l3: L3, l4_payload: &[u8]) -> u16 {
     match l3 {
         L3::IPv4(ipv4, p) => {
             if p == IpProtocol::TCP {
-                return calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip, 
+                return calculate_tcp_udp_checksum(&ipv4.src_ip, &ipv4.dst_ip, 
                     p, l4_payload);
             } else if p == IpProtocol::UDP {
-                let value = calculate_tcp_udp_checksum_v4(&ipv4.src_ip, &ipv4.dst_ip, 
+                let value = calculate_tcp_udp_checksum(&ipv4.src_ip, &ipv4.dst_ip, 
                     p, l4_payload);
                 if value == 0xFFFF {
                     0x0000
@@ -2879,11 +3195,33 @@ pub fn calculate_l4_checksum_v4(l3: L3, l4_payload: &[u8]) -> u16 {
     }
 }
 
+/// # fn calculate_icmp_checksum
+/// A wrapper function to calculate ICMP checksum for IPv4 using 
+/// the generic **calculate_checksum** function.
+/// 
+/// # Params
+/// - icmp_payload: `&[u8]` - The ICMP header and packet's payload as bytes.
+/// 
+/// # Returns
+/// A `u16` which is the checksum value.
+
 fn calculate_icmp_checksum(icmp_payload: &[u8]) -> u16 {
     calculate_checksum(&icmp_payload)
 }
 
-fn calculate_tcp_udp_checksum_v4(src_ip: &Ipv4Addr, dst_ip: &Ipv4Addr,
+/// # fn calculate_tcp_udp_checksum
+/// A wrapper function to calculate TCP/UDP checksum for IPv4 using the generic 
+/// **calculate_checksum** function.
+/// 
+/// # Params
+/// - src_ip: `Ipv4Addr` - Packet's Source IP from IPv4Header.
+/// - dst_ip: `Ipv4Addr` - Packet's Destination IP from IPv4Header.
+/// - protocol: `IpProtocol` - Packet's IP Protocol from IPv4Header.
+/// - l4_payload: `&[u8]` - Layer 4 Header and packet's payload as bytes.
+/// 
+/// # Returns
+/// A `u16` which is the checksum value.
+fn calculate_tcp_udp_checksum(src_ip: &Ipv4Addr, dst_ip: &Ipv4Addr,
 protocol: IpProtocol, l4_payload: &[u8]) -> u16 {
     let mut buffer = Vec::with_capacity(12 + l4_payload.len());
 
@@ -2904,6 +3242,18 @@ protocol: IpProtocol, l4_payload: &[u8]) -> u16 {
     checksum
 }
 
+/// # fn calculate_l4_checksum_v6
+/// A wrapper function to calculate L4 checksum for IPv6 using the generic 
+/// **calculate_checksum** function.
+/// 
+/// # Params
+/// - src_ip: `Ipv6Addr` - Packet's Source IP from IPv6Header.
+/// - dst_ip: `Ipv6Addr` - Packet's Destination IP from IPv6Header.
+/// - next_header: `IpProtocol` - Packet's IP Protocol from IPv6Header.
+/// - l4_payload: `&[u8]` - Layer 4 Header and packet's payload as bytes.
+/// 
+/// # Returns
+/// A `u16` which is the checksum value.
 pub fn calculate_l4_checksum_v6(src_ip: &Ipv6Addr, dst_ip: &Ipv6Addr, next_header: IpProtocol, l4_payload: &[u8]) -> u16 {
     let mut buffer: Vec<u8> = Vec::new();
     
