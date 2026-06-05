@@ -133,7 +133,7 @@ fn main() {
                             L4::TCP(tcp) => {
                                 let flags = TcpFlags::parse(tcp.flags);
                                 if flags == [TcpFlags::SYN] {
-                                    /*if ipv4.src_ip == Ipv4Addr::new(172, 16, 50, 1) {
+                                    if ipv4.src_ip == Ipv4Addr::new(172, 16, 50, 5) {
                                         let mut response = pool.acquire().unwrap();
                                         println!("[PREY] :: BLOCKED IP DETECTED!");
                                         match packet.build_tcp_rst(response.as_mut_slice()) {
@@ -155,7 +155,7 @@ fn main() {
                                                 continue;
                                             }
                                         }
-                                    } Uncomment if you want to test some IP blocking.*/
+                                    } //Uncomment if you want to test some IP blocking.
                                     let mut response = pool.acquire().unwrap();
                                     match packet.build_tcp_syn_ack(response.as_mut_slice()) {
                                         Ok(n) => {

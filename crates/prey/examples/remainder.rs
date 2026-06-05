@@ -1,6 +1,7 @@
 use core::fmt;
 use std::{collections::HashMap, io::ErrorKind, net::{Ipv4Addr, SocketAddr, SocketAddrV4}};
-use prey::{buffer::BufferPool, network::{Connection, RawSocket}, packet::{ArpOperation, EtherType, IpProtocol, L3, L4, Packet, TcpFlags}};
+use prey::{buffer::BufferPool, network::{Connection, RawSocket}, packet::{ArpOperation::{self}, EtherType, IpProtocol, L3, L4, Packet, TcpFlags}};
+use prey::request::{Request, RequestMethod};
 
 const MY_IPV4: Ipv4Addr = Ipv4Addr::new(188, 20, 57, 2);
 const MY_MAC: [u8; 6] = [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff];
@@ -233,6 +234,10 @@ fn main() {
                                     if request.contains("HTTP") {
                                         log!("It's a HTTP request!");
                                         
+                                        let r = Request::new(payload);
+                                        
+                                        println!("REQUEST => {}", r);
+
                                         let line = request.lines().next().unwrap();
                                         let mut line_parts = line.split_whitespace();
                                         let verb = line_parts.next().unwrap();
