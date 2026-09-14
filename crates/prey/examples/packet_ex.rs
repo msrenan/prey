@@ -15,7 +15,7 @@ fn main() {
 
     let dummy_adr = SocketAddr::V4(SocketAddrV4::new(MY_IP, 8080));
 
-    let socket = RawSocket::new("tap0", "172.16.50.1/24".to_string(), "2001:db8::1/64".to_string()).unwrap();
+    let socket = RawSocket::new("172.16.50.1/24".to_string(), "2001:db8::1/64".to_string()).unwrap();
 
     let tx = pool.acquire().unwrap();
     let rx = pool.acquire().unwrap();
@@ -133,7 +133,7 @@ fn main() {
                             L4::TCP(tcp) => {
                                 let flags = TcpFlags::parse(tcp.flags);
                                 if flags == [TcpFlags::SYN] {
-                                    if ipv4.src_ip == Ipv4Addr::new(172, 16, 50, 5) {
+                                    if ipv4.src_ip == Ipv4Addr::new(172, 16, 50, 1) {
                                         let mut response = pool.acquire().unwrap();
                                         println!("[PREY] :: BLOCKED IP DETECTED!");
                                         match packet.build_tcp_rst(response.as_mut_slice()) {

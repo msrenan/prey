@@ -141,7 +141,7 @@ impl RawSocket {
     /// 
     /// # Returns
     /// A `Result` containing the RawSocket object.
-    pub fn new(interface: &str, sub_networkv4: String, sub_networkv6: String) -> io::Result<Self> {
+    pub fn new(sub_networkv4: String, sub_networkv6: String) -> io::Result<Self> {
         setup_tap_interface(sub_networkv4, sub_networkv6).unwrap();
 
         let tap_file = OpenOptions::new()
@@ -151,7 +151,7 @@ impl RawSocket {
 
         let mut ifr: Ifreq = unsafe { std::mem::zeroed() };
         
-        let name_bytes = interface.as_bytes();
+        let name_bytes = "prey-tap0".as_bytes();
         let len = std::cmp::min(name_bytes.len(), 15);
         ifr.ifr_name[..len].copy_from_slice(&name_bytes[..len]);
         ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
@@ -265,9 +265,9 @@ struct Ifreq {
 /// - sub_networkv4: `String` - The subnetwork tap0 should work on (ex: 172.16.50.1/24)
 /// 
 /// # Returns
-/// A `Result<(), Box<dyn Error>>` that represents the success or not of the **tap0** creation.
+/// A `Result<(), Box<dyn Error>>` that represents the success or not of the tap interface (name: 'prey-tap0') creation.
 fn setup_tap_interface(sub_networkv4: String, sub_networkv6: String) -> Result<(), Box<dyn Error>> {
-    let interface = "tap0";
+    let interface = "prey-tap0";
 
     let exists = Command::new("ip")
         .args(["link", "show", interface])
@@ -323,7 +323,7 @@ fn setup_tap_interface(sub_networkv4: String, sub_networkv6: String) -> Result<(
     let ip_dest = parts.join(".");
 
     println!("[PREY] :: routing for {} via {} is active.", ip_dest, interface);
-    println!("[PREY] :: tap0 interface was successfully synchronized!");
+    println!("[PREY] :: {} interface was successfully synchronized!", interface);
 
     Ok(())
 }
