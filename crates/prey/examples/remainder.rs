@@ -35,7 +35,7 @@ impl fmt::Display for Client {
 fn main() {
     let addr = SocketAddr::V4(SocketAddrV4::new(MY_IPV4, 8080));
 
-    let socket = RawSocket::new("tap0",
+    let socket = RawSocket::new(
     "188.20.57.1/24".to_string(), "2006:abc::1/64".to_string()).unwrap();
 
     let pool = BufferPool::new(10);

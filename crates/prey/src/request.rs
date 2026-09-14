@@ -1,10 +1,8 @@
 //! # Request module
-//! The Request module of PREY framework contains all TCP request processing and parsing functions
+//! The Request module of PREY framework contains all HTTP request processing and parsing functions
 //! to ease the later development of a WebServer.
 
 use core::fmt;
-
-// <! ------------------------------- STREAM MANAGEMENT ------------------------------------>
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Request<'a> {
     pub method: RequestMethod,
@@ -116,9 +114,4 @@ impl<'a> fmt::Display for Request<'a> {
         )
     }
 }
-
-
-
-
-// <! ------------------------------- PACKET MANAGEMENT ------------------------------------>
 
