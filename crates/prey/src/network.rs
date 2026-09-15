@@ -1,6 +1,38 @@
 //! # Network Module
 //! The Network Module of PREY framework contains all the communication of user's code and the network.
 //! It defines what is a connection and deals with it: Opening, managing and shutting down.
+//! 
+//! # How to use this module properly
+//! 
+//! ## RawSockets
+//! 
+//! So the first thing you want to do is to define what's your aplication IP. Then you'll create a new
+//! `SocketAddr::V4` object, for you RawSocket.
+//! 
+//! # Code Example
+//! ```rust
+//!     let addr = SocketAddr::V4(SocketAddrV4::new(188.20.57.2, 8080)); // Returns a SocketAddr object
+//!     let socket = RawSocket::new("prey-tap0", "188.20.57.1/24", "2006:abc::1/64").unwrap(); // Creates RawSocket
+//!     let pool = BufferPool::new(10); // Initializes bufferpool
+//!     let tx = pool.acquire().unwrap(); // Buffer acquiring (write_buffer)
+//!     let rx = pool.acquire().unwrap(); // Buffer acquiring (read_buffer)
+//!     let mut conn = Connection::new(socket, addr, tx, rx).unwrap(); // Creating connection
+//! 
+//!     loop { // Listening loop
+//!         match conn.receive() { // Receiving data
+//!             Ok(0) => {}, // Does nothing
+//!             Err(e) if e.kind() == ErrorKind::WouldBlock => {}, // Does nothing
+//!             Err(e) => { // Default internal error treatment
+//!                 log!("Error while receiving data: {}", e);
+//!                 conn.read_buffer.clear();
+//!             },
+//!             Ok(n) => { // Data processing
+//!                 println!("Received {} bytes of data!", n);
+//!                 [...] // Data processing
+//!             }
+//!         }
+//!     }
+//! ```
 #[cfg(target_os = "linux")]
 use std::fs::{File, OpenOptions};
 use std::net::{TcpStream, SocketAddr};
@@ -44,6 +76,15 @@ impl<S: Read + Write> Connection<S> {
     ///
     /// # Returns
     /// A `Result` of containing the Connection object.
+    /// 
+    /// # Usage
+    /// ```rust
+    ///     let write_buffer = pool.acquire();
+    ///     let read_buffer = pool.acquire();
+    ///     
+    ///     let conn = Connection::new(CONN, write_buffer, read_buffer) // returns a new Connection object.
+    ///     // CONN is the conection type, which can be a TcpStream or a RawSocket.
+    /// ```
     pub fn new(stream: S, addr: SocketAddr, wb: Buffer, rb: Buffer) -> io::Result<Self> {
         //stream.set_nonblocking(true)?; -> Deve ser feito antes de utilizar essa função, agora.
             Ok(Self {
@@ -65,6 +106,24 @@ impl<S: Read + Write> Connection<S> {
     /// - **Ok(n)** - If the client have sent some information.
     /// - **Err(e)** - If some error *e* have happened. **Do not forget to handle the *WouldBlock* error (the event loop
     ///                 should do nothing when it happens)**.
+    /// 
+    /// # Usage
+    /// - Optimaly, done inside a `loop {}`
+    /// ```rust
+    ///     match conn.receive() {
+    ///         Ok(0) => {}, // Does nothing
+    ///         Ok(n) => {
+    ///             [...] // Data processing
+    ///         },
+    ///         Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}, // Does nothing
+    ///         Err(e) => {
+    ///             [...] // Internal error tratments
+    ///         }
+    ///     }
+    /// ```
+    /// 
+    /// - **IMPORTANT**: After the end of data processing, you **need** to clear `conn.read_buffer`, so when you receive
+    /// more data, the buffer will not be carrying the already processed data too.
     pub fn receive(&mut self) -> io::Result<usize> {
         let space = self.read_buffer.as_mut_slice();
 
@@ -96,6 +155,14 @@ impl<S: Read + Write> Connection<S> {
     /// - **Ok(n)** - If the data has been successfully written on stream, with *n* being the amount of
     /// bits written.
     /// - **Err(e)** - If some error *e* have happened.
+    /// 
+    /// # Usage
+    /// ```rust
+    ///     let wb = conn.write_buffer.as_mut_slice(); // Get Connection's `write_buffer` empty space for writing
+    ///     wb[..content.len()].copy_from_slice(&content); // Writing `content` at `conn.write_buffer` (wb)
+    ///     conn.write_buffer.advance(content.len() as usize); // Increasing filled data segment of `conn.write_buffer`
+    ///     conn.send().unwrap(); // Attempts to send message and if succeeded, automatically clears `conn.write_buffer`
+    /// ```
     pub fn send(&mut self) -> io::Result<usize> {
         let data = self.write_buffer.data();
 
@@ -134,15 +201,20 @@ impl RawSocket {
     ///
     /// # Params
     /// - interface: `&str` - The interface name which will be used by the RawSocket.
-    /// - sub_networkv4: `String` - A IPv4 sub-network ("199.215.25.1/24") where the RawSocket will 
+    /// - sub_networkv4: `&str` - A IPv4 sub-network ("199.215.25.1/24") where the RawSocket will 
     /// listen for IPv4 packets.
-    /// - sub_networkv6: `String` - A IPv6 sub-network ("2000:ab2::1/64") where the Raw Socket will
+    /// - sub_networkv6: `&str` - A IPv6 sub-network ("2000:ab2::1/64") where the Raw Socket will
     /// listen for IPv6 packets. 
     /// 
     /// # Returns
     /// A `Result` containing the RawSocket object.
-    pub fn new(sub_networkv4: String, sub_networkv6: String) -> io::Result<Self> {
-        setup_tap_interface(sub_networkv4, sub_networkv6).unwrap();
+    /// 
+    /// # Usage
+    /// ```rust
+    ///     let sock = RawSocket::new("prey-tap0", "192.168.144.1/24", "abcd::2006::1/64") // Will create a new socket at `prey-tap0` interface, with IPv4 and IPv6 passed as params
+    /// ```
+    pub fn new(interface: &str, sub_networkv4: &str, sub_networkv6: &str) -> io::Result<Self> {
+        setup_tap_interface(interface, sub_networkv4, sub_networkv6).unwrap();
 
         let tap_file = OpenOptions::new()
             .read(true)
@@ -266,8 +338,10 @@ struct Ifreq {
 /// 
 /// # Returns
 /// A `Result<(), Box<dyn Error>>` that represents the success or not of the tap interface (name: 'prey-tap0') creation.
-fn setup_tap_interface(sub_networkv4: String, sub_networkv6: String) -> Result<(), Box<dyn Error>> {
-    let interface = "prey-tap0";
+/// 
+/// # Usage
+/// This is a private function, only being used by `RawSocket::new([...])`!
+fn setup_tap_interface(interface: &str, sub_networkv4: &str, sub_networkv6: &str) -> Result<(), Box<dyn Error>> {
 
     let exists = Command::new("ip")
         .args(["link", "show", interface])
@@ -284,7 +358,7 @@ fn setup_tap_interface(sub_networkv4: String, sub_networkv6: String) -> Result<(
     }
 
     let ip_output = Command::new("sudo")
-        .args(["ip", "addr", "add", &sub_networkv4, "dev", interface])
+        .args(["ip", "addr", "add", sub_networkv4, "dev", interface])
         .stderr(Stdio::piped()) 
         .output()?;
 
@@ -298,7 +372,7 @@ fn setup_tap_interface(sub_networkv4: String, sub_networkv6: String) -> Result<(
     }
 
     let output = Command::new("sudo")
-        .args(["ip", "-6", "addr", "add", &sub_networkv6, "dev", interface])
+        .args(["ip", "-6", "addr", "add", sub_networkv6, "dev", interface])
         .stderr(Stdio::piped())
         .output()?;
 
@@ -315,7 +389,7 @@ fn setup_tap_interface(sub_networkv4: String, sub_networkv6: String) -> Result<(
         .args(["ip", "link", "set", interface, "up"])
         .status()?;
 
-    let base_ip = sub_networkv4.split_once("/").map(|(ip, _)| ip).unwrap_or(&sub_networkv4);
+    let base_ip = sub_networkv4.split_once("/").map(|(ip, _)| ip).unwrap_or(sub_networkv4);
     let mut parts: Vec<&str> = base_ip.split('.').collect();
     if parts.len() == 4 {
         parts[3] = "1"; 

@@ -12,7 +12,7 @@ use std::{fmt, net::{Ipv4Addr, Ipv6Addr}};
 /// Struct that holds a pointer for the raw bytes of a packet in a buffer.
 ///
 /// ### Lifetime <'a>
-/// Used a lifetime so a raw packet pointing to a buffer lasts only while the buffer lasts too.
+/// Used a lifetime so a raw packet pointing to a buffer only lasts while the buffer lasts too.
 ///
 /// # Fields
 /// - raw: `&'a [u8]` - Pointer to the raw bytes of the packet within a buffer.
@@ -483,10 +483,6 @@ impl<'a> Packet<'a> {
             Ok(data) => data,
             Err(e) =>  {return Err(e); }
         };
-
-        //This function need to be upgraded -> A param type_of_reject need to be passed to decide
-        // what code will be used while building the icmp reply. For now, its going to be a default
-        // UDP denying function.
 
         match l3 {
             L3::IPv4(ipv4, _) => {

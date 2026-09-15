@@ -15,7 +15,7 @@ fn main() {
 
     let dummy_adr = SocketAddr::V4(SocketAddrV4::new(MY_IP, 8080));
 
-    let socket = RawSocket::new("172.16.50.1/24".to_string(), "2001:db8::1/64".to_string()).unwrap();
+    let socket = RawSocket::new("prey-tap0","172.16.50.1/24", "2001:db8::1/64").unwrap();
 
     let tx = pool.acquire().unwrap();
     let rx = pool.acquire().unwrap();
